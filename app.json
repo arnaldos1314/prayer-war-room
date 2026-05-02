@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "prayer-war-room",
+    "slug": "prayer-war-room",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "myapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+"bundleIdentifier": "com.arnaldo.warroom",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2ddd8722-73be-4680-92d9-ce101c1a30d5"
+      }
+    },
+    "android": {
+      "package": "com.arnaldo.warroom"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-router",
+      "expo-web-browser"
+    ]
+  }
+}

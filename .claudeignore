@@ -1,0 +1,11 @@
+node_modules/
+.git/
+dist/
+build/
+.next/
+.expo/
+*.log
+*.lock
+package-lock.json
+pnpm-lock.yaml
+.env
