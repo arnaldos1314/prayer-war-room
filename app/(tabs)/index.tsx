@@ -73,6 +73,7 @@ const WEB_NAV = [
   { icon: 'people-circle-outline', label: 'Pared de Oración', key: 'wall'         },
   { icon: 'people-outline',        label: 'Intercesores',     key: 'intercesores' },
   { icon: 'settings-outline',      label: 'Ajustes',          key: 'ajustes'      },
+  { icon: 'bar-chart-outline',     label: 'Estadísticas',     key: 'stats'        },
 ] as const;
 type NavKey = typeof WEB_NAV[number]['key'];
 
@@ -87,6 +88,121 @@ const CAT_COLORS: Record<string, string> = {
 };
 
 const NEW_CATS = ['salud', 'familia', 'finanzas', 'trabajo', 'otro'] as const;
+
+// ─────────────────────────────────────────────────────────────
+//  AI SUGGESTION  (Anthropic Claude Haiku)
+// ─────────────────────────────────────────────────────────────
+type AISuggestion = { verse: string; verseRef: string; prayer: string; encouragement: string };
+
+async function getAISuggestion(
+  content: string,
+  category: string,
+  context: 'member' | 'pastor' = 'member'
+): Promise<AISuggestion> {
+  const systemPrompt = context === 'member'
+    ? `Eres un pastor espiritual compasivo. Cuando alguien comparte una petición de oración, respondes con: un versículo bíblico relevante, una oración corta guiada (2-3 oraciones), y una palabra de aliento breve. Responde SOLO en JSON válido, sin markdown.`
+    : `Eres un asistente pastoral. Sugiere un versículo bíblico y una nota pastoral breve para que el pastor ore por esta petición. Responde SOLO en JSON válido, sin markdown.`;
+
+  const userPrompt = `Petición de oración - Categoría: ${category}\nContenido: "${content}"\n\nResponde en este formato JSON exacto:\n{\n  "verse": "texto del versículo aquí",\n  "verseRef": "Libro capítulo:versículo",\n  "prayer": "oración guiada aquí",\n  "encouragement": "palabra de aliento breve aquí"\n}`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_KEY!,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: userPrompt }],
+        system: systemPrompt,
+      }),
+    });
+    const data = await response.json();
+    const text = data.content[0].text;
+    return JSON.parse(text);
+  } catch {
+    return {
+      verse: 'No os ha sobrevenido ninguna tentación que no sea humana; pero fiel es Dios.',
+      verseRef: '1 Corintios 10:13',
+      prayer: 'Señor, te traemos esta situación y confiamos en Tu fidelidad. Guía, sana y fortalece a quien te busca en este momento.',
+      encouragement: 'Dios es fiel y está contigo en este momento. Él tiene el control.',
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SERMON SUGGESTION  (Anthropic Claude Haiku)
+// ─────────────────────────────────────────────────────────────
+type SermonSuggestion = { title: string; verse: string; verseRef: string; outline: string[]; encouragement: string };
+
+async function getSermonSuggestion(context: string): Promise<SermonSuggestion> {
+  const systemPrompt = `Eres un asistente homilético pastoral. Basándote en el estado actual de las peticiones de oración del ministerio, sugiere un sermón relevante. Responde SOLO en JSON válido, sin markdown ni texto adicional.`;
+  const userPrompt = `Estado del ministerio:\n${context}\n\nSugiere un sermón en este formato JSON exacto:\n{\n  "title": "Título del sermón",\n  "verse": "Texto del versículo principal",\n  "verseRef": "Libro capítulo:versículo",\n  "outline": ["Punto 1", "Punto 2", "Punto 3"],\n  "encouragement": "Palabra de aliento para el pastor"\n}`;
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_KEY!,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5', max_tokens: 600,
+        messages: [{ role: 'user', content: userPrompt }],
+        system: systemPrompt,
+      }),
+    });
+    const data = await response.json();
+    return JSON.parse(data.content[0].text);
+  } catch {
+    return {
+      title: 'La fidelidad de Dios en tiempos de prueba',
+      verse: 'El que comenzó en vosotros la buena obra, la perfeccionará hasta el día de Jesucristo.',
+      verseRef: 'Filipenses 1:6',
+      outline: ['La promesa de Dios en la adversidad', 'El poder de la oración comunitaria', 'Victorias que glorifican a Dios'],
+      encouragement: 'Tu ministerio de oración está transformando vidas. Sigue adelante con fe.',
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  FLOCK INSIGHT  (Anthropic Claude Haiku)
+// ─────────────────────────────────────────────────────────────
+type FlockInsight = { insight: string; verse: string; verseRef: string };
+
+async function getFlockInsight(context: string): Promise<FlockInsight> {
+  const systemPrompt = `Eres un consejero pastoral con sabiduría bíblica. Analiza el estado espiritual del rebaño basándote en las peticiones de oración y ofrece una perspectiva pastoral profunda. Responde SOLO en JSON válido, sin markdown.`;
+  const userPrompt = `Datos del rebaño:\n${context}\n\nResponde en este formato JSON exacto:\n{\n  "insight": "Perspectiva pastoral sobre el estado espiritual del rebaño (2-3 oraciones)",\n  "verse": "Versículo bíblico de aliento y guía",\n  "verseRef": "Libro capítulo:versículo"\n}`;
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_KEY!,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5', max_tokens: 400,
+        messages: [{ role: 'user', content: userPrompt }],
+        system: systemPrompt,
+      }),
+    });
+    const data = await response.json();
+    return JSON.parse(data.content[0].text);
+  } catch {
+    return {
+      insight: 'El rebaño está buscando a Dios con fervor. Las peticiones reflejan un pueblo que confía en la soberanía divina. Continúa guiándoles con oración y la Palabra.',
+      verse: 'Cuidad de vosotros mismos, y de todo el rebaño en que el Espíritu Santo os ha puesto por obispos.',
+      verseRef: 'Hechos 20:28',
+    };
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 //  WEB CRM LAYOUT  (real Supabase data)
@@ -174,6 +290,41 @@ function WebCRM() {
   const [memberSubmitting, setMemberSubmitting] = useState(false);
   const [memberErr,        setMemberErr]        = useState('');
 
+  // AI Suggestion — Member (Feature 1A)
+  const [memberAiVisible,    setMemberAiVisible]    = useState(false);
+  const [memberAiLoading,    setMemberAiLoading]    = useState(false);
+  const [memberAiSuggestion, setMemberAiSuggestion] = useState<AISuggestion | null>(null);
+  const [memberAiRequestId,  setMemberAiRequestId]  = useState<string | null>(null);
+  const [memberAiSaving,     setMemberAiSaving]     = useState(false);
+
+  // AI Suggestion — Pastor (Feature 1B)
+  const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
+  const [aiLoading,    setAiLoading]    = useState(false);
+
+  // Analytics (Feature 2)
+  const [analyticsData,     setAnalyticsData]     = useState<any[]>([]);
+  const [analyticsProfiles, setAnalyticsProfiles] = useState<any[]>([]);
+  const [analyticsLoading,  setAnalyticsLoading]  = useState(false);
+
+  // Sermon AI suggestion
+  const [sermonSuggestion, setSermonSuggestion] = useState<SermonSuggestion | null>(null);
+  const [sermonLoading,    setSermonLoading]    = useState(false);
+
+  // Flock insight (auto-runs with analytics)
+  const [flockInsight,        setFlockInsight]        = useState<FlockInsight | null>(null);
+  const [flockInsightLoading, setFlockInsightLoading] = useState(false);
+
+  // Member Circles
+  const [circles,              setCircles]              = useState<any[]>([]);
+  const [circleSearch,         setCircleSearch]         = useState('');
+  const [searchResults,        setSearchResults]        = useState<any[]>([]);
+  const [circleTab,            setCircleTab]            = useState<'members' | 'add'>('members');
+  const [circleInviting,       setCircleInviting]       = useState<string | null>(null);
+  const [pendingInvitations,   setPendingInvitations]   = useState<any[]>([]);
+  const [pendingInviteCount,   setPendingInviteCount]   = useState(0);
+  const [selectedCircleType,   setSelectedCircleType]   = useState<'family' | 'friends' | 'ministry'>('friends');
+  const searchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Fetch current user's profile role on mount
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -248,6 +399,45 @@ function WebCRM() {
           setWallPendingCount(all.filter((r: any) => r.wall_pending && !r.wall_approved).length);
           setWallLoading(false);
         });
+    }
+  }, [activeNav]);
+
+  // Fetch analytics data when stats panel becomes active
+  useEffect(() => {
+    if (activeNav === 'stats') {
+      setAnalyticsLoading(true);
+      setFlockInsight(null);
+      setSermonSuggestion(null);
+      Promise.all([
+        supabase
+          .from('prayer_requests')
+          .select('category, status, country_code, created_at, victory_date, assigned_to, urgent')
+          .eq('space_type', 'ministry'),
+        supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('role', ['pastor', 'intercessor']),
+      ]).then(([{ data: reqs }, { data: profs }]) => {
+        const loadedReqs = reqs ?? [];
+        setAnalyticsData(loadedReqs);
+        setAnalyticsProfiles(profs ?? []);
+        setAnalyticsLoading(false);
+        // Auto-run flock insight
+        if (loadedReqs.length > 0) {
+          const totalReqs = loadedReqs.length;
+          const victoryReqs = loadedReqs.filter((r: any) => r.status === 'victory').length;
+          const urgentReqs = loadedReqs.filter((r: any) => r.urgent).length;
+          const topCat = Object.entries(
+            loadedReqs.reduce((acc: any, r: any) => { if (r.category) acc[r.category] = (acc[r.category] ?? 0) + 1; return acc; }, {})
+          ).sort((a: any, b: any) => b[1] - a[1])[0]?.[0] ?? 'otro';
+          const ctx = `Ministerio con ${totalReqs} peticiones totales. Victorias: ${victoryReqs} (${Math.round((victoryReqs/totalReqs)*100)}%). Peticiones urgentes activas: ${urgentReqs}. Categoría principal: ${topCat}. Intercesores activos: ${(profs ?? []).length}.`;
+          setFlockInsightLoading(true);
+          getFlockInsight(ctx).then(insight => {
+            setFlockInsight(insight);
+            setFlockInsightLoading(false);
+          });
+        }
+      });
     }
   }, [activeNav]);
 
@@ -341,9 +531,11 @@ function WebCRM() {
     if (!memberContent.trim()) { setMemberErr('Escribe tu petición.'); return; }
     if (!currentUserId) return;
     setMemberSubmitting(true); setMemberErr('');
+    const savedContent = memberContent.trim();
+    const savedCat = memberCat;
     try {
       const spaceMap: Record<string, string> = { personal: 'personal', family: 'family', friends: 'family', ministry: 'ministry' };
-      await supabase.from('prayer_requests').insert({
+      const { data: inserted } = await supabase.from('prayer_requests').insert({
         user_id:      currentUserId,
         space_type:   spaceMap[memberCircle] ?? 'personal',
         category:     memberCat,
@@ -355,19 +547,112 @@ function WebCRM() {
         wall_pending: memberVisibility === 'congregation',
         wall_approved: false,
         pray_count:   0,
-      });
+      }).select('id').single();
+
       setMemberContent(''); setMemberUrgent(false); setMemberCat('salud');
       setMemberVisibility('private'); setMemberAnonymous(false);
       setMemberShowForm(false);
       fetchMemberPrayers();
-      if (memberVisibility === 'congregation') {
-        setWallPendingCount(prev => prev + 1);
-      }
+      if (memberVisibility === 'congregation') setWallPendingCount(prev => prev + 1);
+
+      // Trigger AI suggestion
+      setMemberAiRequestId((inserted as any)?.id ?? null);
+      setMemberAiSuggestion(null);
+      setMemberAiVisible(true);
+      setMemberAiLoading(true);
+      getAISuggestion(savedContent, savedCat, 'member').then(s => {
+        setMemberAiSuggestion(s);
+        setMemberAiLoading(false);
+      });
     } catch (err: any) {
       setMemberErr(err.message ?? 'Error al guardar');
     } finally {
       setMemberSubmitting(false);
     }
+  };
+
+  const handleSaveAiToRequest = async () => {
+    if (!memberAiRequestId || !memberAiSuggestion) return;
+    setMemberAiSaving(true);
+    await supabase.from('prayer_requests').update({
+      ai_verse:  `${memberAiSuggestion.verseRef} — ${memberAiSuggestion.verse}`,
+      ai_prayer: memberAiSuggestion.prayer,
+    }).eq('id', memberAiRequestId);
+    setMemberAiSaving(false);
+    setMemberAiVisible(false);
+    setMemberAiSuggestion(null);
+    setMemberAiRequestId(null);
+    fetchMemberPrayers();
+  };
+
+  // ── Circles (Member) ──
+  const fetchCircles = useCallback(async () => {
+    if (!currentUserId) return;
+    const { data } = await supabase
+      .from('circles')
+      .select('*, member:member_id(id, full_name), owner:owner_id(id, full_name)')
+      .or(`owner_id.eq.${currentUserId},member_id.eq.${currentUserId}`)
+      .eq('status', 'accepted');
+    setCircles(data ?? []);
+  }, [currentUserId]);
+
+  const fetchPendingInvitations = useCallback(async () => {
+    if (!currentUserId) return;
+    const { data } = await supabase
+      .from('circles')
+      .select('*, owner:owner_id(id, full_name)')
+      .eq('member_id', currentUserId)
+      .eq('status', 'pending');
+    const inv = data ?? [];
+    setPendingInvitations(inv);
+    setPendingInviteCount(inv.length);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (currentUserId && currentUserRole && currentUserRole !== 'pastor') {
+      fetchCircles();
+      fetchPendingInvitations();
+    }
+  }, [currentUserId, currentUserRole, fetchCircles, fetchPendingInvitations]);
+
+  const searchMembers = useCallback((query: string) => {
+    setCircleSearch(query);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!query.trim()) { setSearchResults([]); return; }
+    searchDebounceRef.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .ilike('full_name', `%${query.trim()}%`)
+        .neq('id', currentUserId ?? '')
+        .limit(10);
+      setSearchResults(data ?? []);
+    }, 400);
+  }, [currentUserId]);
+
+  const inviteToCircle = async (memberId: string) => {
+    if (!currentUserId) return;
+    setCircleInviting(memberId);
+    await supabase.from('circles').insert({
+      owner_id:    currentUserId,
+      member_id:   memberId,
+      circle_type: selectedCircleType,
+      status:      'pending',
+    });
+    setCircleInviting(null);
+    setCircleSearch('');
+    setSearchResults([]);
+  };
+
+  const acceptCircle = async (circleId: string) => {
+    await supabase.from('circles').update({ status: 'accepted' }).eq('id', circleId);
+    await fetchPendingInvitations();
+    await fetchCircles();
+  };
+
+  const declineCircle = async (circleId: string) => {
+    await supabase.from('circles').update({ status: 'declined' }).eq('id', circleId);
+    await fetchPendingInvitations();
   };
 
   // Keep selected fresh when realtime updates arrive
@@ -384,6 +669,8 @@ function WebCRM() {
     setNote(r.pastor_note ?? '');
     setInterSearch('');
     setShowNewForm(false);
+    setAiSuggestion(null);
+    setAiLoading(false);
   };
 
   // Stats computed from live data
@@ -558,12 +845,70 @@ function WebCRM() {
             <Pressable
               key={c.key}
               style={[w.navItem, memberCircle === c.key && w.navItemActive]}
-              onPress={() => { setMemberCircle(c.key as any); setMemberShowForm(false); }}
+              onPress={() => { setMemberCircle(c.key as any); setMemberShowForm(false); setCircleTab('members'); }}
             >
               <Ionicons name={c.icon as any} size={18} color={memberCircle === c.key ? '#a78bfa' : '#475569'} />
               <Text style={[w.navLabel, memberCircle === c.key && w.navLabelActive]}>{c.label}</Text>
             </Pressable>
           ))}
+
+          {/* Mi equipo section */}
+          <View style={w.sidebarDivider} />
+          <Text style={[w.sectionLbl, { marginBottom: 8, marginLeft: 4 }]}>MI EQUIPO</Text>
+
+          {pendingInviteCount > 0 && (
+            <View style={{ backgroundColor: '#7c3aed22', borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: '#7c3aed44' }}>
+              <Text style={{ color: '#a78bfa', fontSize: 12, fontWeight: '600' }}>
+                🔔 {pendingInviteCount} invitación{pendingInviteCount > 1 ? 'es' : ''} pendiente{pendingInviteCount > 1 ? 's' : ''}
+              </Text>
+              {pendingInvitations.slice(0, 3).map((inv: any) => (
+                <View key={inv.id} style={{ marginTop: 8 }}>
+                  <Text style={{ color: '#cbd5e1', fontSize: 11, marginBottom: 4 }}>
+                    {inv.owner?.full_name ?? 'Alguien'} te invitó a su círculo
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <Pressable
+                      style={{ backgroundColor: '#7c3aed', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}
+                      onPress={() => acceptCircle(inv.id)}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>Aceptar</Text>
+                    </Pressable>
+                    <Pressable
+                      style={{ backgroundColor: '#1e293b', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}
+                      onPress={() => declineCircle(inv.id)}
+                    >
+                      <Text style={{ color: '#475569', fontSize: 11 }}>Rechazar</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {circles.length === 0 ? (
+            <Text style={{ color: '#1e293b', fontSize: 12, marginBottom: 8, marginLeft: 4 }}>Sin conexiones aún</Text>
+          ) : (
+            circles.slice(0, 4).map((c: any) => {
+              const other = c.owner_id === currentUserId ? c.member : c.owner;
+              return (
+                <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <View style={[w.assignedAvatarBig, { width: 28, height: 28, borderRadius: 14 }]}>
+                    <Text style={[w.assignedAvatarTxt, { fontSize: 10 }]}>{getInitials(other?.full_name ?? '?')}</Text>
+                  </View>
+                  <Text style={{ color: '#64748b', fontSize: 12, flex: 1 }} numberOfLines={1}>{other?.full_name ?? 'Miembro'}</Text>
+                </View>
+              );
+            })
+          )}
+
+          <Pressable
+            style={[w.navItem, { borderStyle: 'dashed', borderWidth: 1, borderColor: '#334155', borderRadius: 8 }]}
+            onPress={() => { setCircleTab('add'); setMemberShowForm(false); }}
+          >
+            <Ionicons name="person-add-outline" size={16} color="#475569" />
+            <Text style={[w.navLabel, { fontSize: 12 }]}>+ Agregar miembro</Text>
+          </Pressable>
+
           <View style={{ flex: 1 }} />
           <Pressable style={w.signOutBtn} onPress={() => supabase.auth.signOut()}>
             <Ionicons name="log-out-outline" size={15} color="#475569" />
@@ -636,9 +981,155 @@ function WebCRM() {
               )}
             </View>
 
-            {/* Form panel */}
+            {/* Form panel + AI overlay */}
             <View style={w.detail}>
-              {memberShowForm ? (
+              {circleTab === 'add' ? (
+                <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                    <Text style={w.detailName}>Agregar a mi equipo</Text>
+                    <Pressable style={{ marginLeft: 'auto' as any }} onPress={() => setCircleTab('members')}>
+                      <Ionicons name="close" size={20} color="#475569" />
+                    </Pressable>
+                  </View>
+
+                  <Text style={w.sectionLbl}>TIPO DE CÍRCULO</Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+                    {(['family', 'friends', 'ministry'] as const).map(t => (
+                      <Pressable
+                        key={t}
+                        style={[w.catPill, selectedCircleType === t && w.catPillActive]}
+                        onPress={() => setSelectedCircleType(t)}
+                      >
+                        <Text style={[w.catPillTxt, selectedCircleType === t && { color: '#fff' }]}>
+                          {t === 'family' ? 'Familia' : t === 'friends' ? 'Amigos' : 'Ministerio'}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <Text style={w.sectionLbl}>BUSCAR MIEMBRO</Text>
+                  <View style={[w.searchBar, { marginBottom: 12 }]}>
+                    <Ionicons name="search-outline" size={16} color="#475569" />
+                    <TextInput
+                      style={w.searchInput as any}
+                      placeholder="Nombre del miembro…"
+                      placeholderTextColor="#475569"
+                      value={circleSearch}
+                      onChangeText={searchMembers}
+                    />
+                  </View>
+
+                  {searchResults.length === 0 && circleSearch.trim().length > 0 && (
+                    <Text style={{ color: '#334155', fontSize: 13 }}>Sin resultados para "{circleSearch}"</Text>
+                  )}
+                  {searchResults.map((member: any) => (
+                    <View key={member.id} style={[w.card, { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginBottom: 8 }]}>
+                      <View style={[w.assignedAvatarBig, { width: 36, height: 36, borderRadius: 18 }]}>
+                        <Text style={[w.assignedAvatarTxt, { fontSize: 12 }]}>{getInitials(member.full_name ?? '?')}</Text>
+                      </View>
+                      <Text style={{ color: '#e2e8f0', fontSize: 14, flex: 1 }}>{member.full_name}</Text>
+                      <Pressable
+                        style={[w.victoriaBtn, { paddingHorizontal: 16, paddingVertical: 8, marginBottom: 0, opacity: circleInviting === member.id ? 0.6 : 1 }]}
+                        disabled={circleInviting === member.id}
+                        onPress={() => inviteToCircle(member.id)}
+                      >
+                        {circleInviting === member.id
+                          ? <ActivityIndicator size="small" color="#fff" />
+                          : <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 12 }]}>Invitar</Text>}
+                      </Pressable>
+                    </View>
+                  ))}
+
+                  {circles.length > 0 && (
+                    <>
+                      <Text style={[w.sectionLbl, { marginTop: 20 }]}>EQUIPO ACTUAL</Text>
+                      {circles.map((c: any) => {
+                        const other = c.owner_id === currentUserId ? c.member : c.owner;
+                        return (
+                          <View key={c.id} style={[w.card, { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginBottom: 8 }]}>
+                            <View style={[w.assignedAvatarBig, { width: 36, height: 36, borderRadius: 18 }]}>
+                              <Text style={[w.assignedAvatarTxt, { fontSize: 12 }]}>{getInitials(other?.full_name ?? '?')}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: '#e2e8f0', fontSize: 13, fontWeight: '600' }}>{other?.full_name ?? 'Miembro'}</Text>
+                              <Text style={{ color: '#475569', fontSize: 11 }}>
+                                {c.circle_type === 'family' ? 'Familia' : c.circle_type === 'friends' ? 'Amigos' : 'Ministerio'}
+                              </Text>
+                            </View>
+                            <View style={[w.badge, { backgroundColor: '#14532d22', borderColor: '#4ade8044' }]}>
+                              <Text style={[w.badgeTxt, { color: '#4ade80' }]}>Activo</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </>
+                  )}
+                </ScrollView>
+              ) : memberAiVisible ? (
+                <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                    <Text style={{ fontSize: 20 }}>✨</Text>
+                    <Text style={{ color: '#a78bfa', fontSize: 16, fontWeight: '600', flex: 1 }}>Palabra para ti</Text>
+                    <Pressable onPress={() => { setMemberAiVisible(false); setMemberAiSuggestion(null); }}>
+                      <Ionicons name="close" size={20} color="#475569" />
+                    </Pressable>
+                  </View>
+
+                  {memberAiLoading ? (
+                    <View style={[w.aiCard, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+                      <ActivityIndicator color="#a78bfa" />
+                      <Text style={{ color: '#64748b', fontSize: 13 }}>Buscando un versículo para ti…</Text>
+                    </View>
+                  ) : memberAiSuggestion ? (
+                    <>
+                      {/* Verse */}
+                      <View style={[w.aiCard, { marginBottom: 12 }]}>
+                        <Text style={[w.sectionLbl, { marginBottom: 10, color: '#7c3aed' }]}>📖 VERSÍCULO</Text>
+                        <View style={{ backgroundColor: 'rgba(124,58,237,0.08)', borderRadius: 12, padding: 14 }}>
+                          <Text style={{ color: '#c4b5fd', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
+                            {memberAiSuggestion.verse}
+                          </Text>
+                          <Text style={{ color: '#7c3aed', fontSize: 12, textAlign: 'right', marginTop: 6 }}>
+                            {memberAiSuggestion.verseRef}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Prayer */}
+                      <View style={[w.aiCard, { marginBottom: 12 }]}>
+                        <Text style={[w.sectionLbl, { marginBottom: 6 }]}>🙏 ORACIÓN GUIADA</Text>
+                        <Text style={{ color: '#94a3b8', fontSize: 13, lineHeight: 20 }}>
+                          {memberAiSuggestion.prayer}
+                        </Text>
+                      </View>
+
+                      {/* Encouragement */}
+                      <View style={[w.aiCard, { marginBottom: 20 }]}>
+                        <Text style={{ color: '#e2e8f0', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
+                          💡 {memberAiSuggestion.encouragement}
+                        </Text>
+                      </View>
+
+                      <Pressable
+                        style={[w.victoriaBtn, { backgroundColor: '#7c3aed', marginBottom: 10 }]}
+                        onPress={handleSaveAiToRequest}
+                        disabled={memberAiSaving}
+                      >
+                        {memberAiSaving
+                          ? <ActivityIndicator color="#fff" />
+                          : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar con mi petición</Text>}
+                      </Pressable>
+
+                      <Pressable
+                        style={{ alignItems: 'center', paddingVertical: 10 }}
+                        onPress={() => { setMemberAiVisible(false); setMemberAiSuggestion(null); }}
+                      >
+                        <Text style={{ color: '#475569', fontSize: 13 }}>Cerrar</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                </ScrollView>
+              ) : memberShowForm ? (
                 <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
                   <Text style={w.detailName}>Nueva Petición</Text>
                   <Text style={{ color: '#475569', fontSize: 12, marginBottom: 20, marginTop: 4 }}>
@@ -1179,6 +1670,300 @@ function WebCRM() {
             </View>
           </View>
 
+        ) : activeNav === 'stats' ? (
+          /* ══ ANALYTICS PANEL ══ */
+          analyticsLoading ? (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator color="#7c3aed" size="large" />
+              <Text style={{ color: '#475569', marginTop: 12 }}>Calculando estadísticas…</Text>
+            </View>
+          ) : (() => {
+            // ── Compute analytics client-side ──
+            const total = analyticsData.length;
+            const victories = analyticsData.filter(r => r.status === 'victory').length;
+            const victoryRate = total > 0 ? Math.round((victories / total) * 100) : 0;
+
+            const battleItems = analyticsData.filter(r => r.status === 'victory' && r.victory_date && r.created_at);
+            const avgDays = battleItems.length > 0
+              ? (battleItems.reduce((sum, r) => sum + (new Date(r.victory_date).getTime() - new Date(r.created_at).getTime()) / 86400000, 0) / battleItems.length).toFixed(1)
+              : '—';
+
+            const countriesSet = new Set(analyticsData.map(r => r.country_code).filter(Boolean));
+
+            const groupBy = (arr: any[], key: string): Record<string, number> =>
+              arr.reduce((acc, item) => { const k = item[key] ?? 'otro'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+
+            const byCategory = groupBy(analyticsData, 'category');
+            const byCountry  = groupBy(analyticsData, 'country_code');
+            const byAssigned = groupBy(analyticsData.filter(r => r.assigned_to), 'assigned_to');
+
+            const maxCat = Math.max(1, ...Object.values(byCategory) as number[]);
+
+            const sortedCountries = Object.entries(byCountry)
+              .filter(([k]) => k && k !== 'null')
+              .sort((a, b) => (b[1] as number) - (a[1] as number))
+              .slice(0, 10);
+            const maxCountry = Math.max(1, ...(sortedCountries.map(([, v]) => v) as number[]));
+
+            const profileMap: Record<string, string> = {};
+            analyticsProfiles.forEach((p: any) => { profileMap[p.id] = p.full_name ?? p.id.slice(0, 8); });
+
+            const topIntercessors = Object.entries(byAssigned)
+              .sort((a, b) => (b[1] as number) - (a[1] as number))
+              .slice(0, 5)
+              .map(([id, cnt]) => ({ name: profileMap[id] ?? id.slice(0, 8), count: cnt as number }));
+
+            const recentVictories = analyticsData
+              .filter(r => r.status === 'victory' && r.victory_date)
+              .sort((a, b) => new Date(b.victory_date).getTime() - new Date(a.victory_date).getTime())
+              .slice(0, 5);
+
+            // 8-week timeline
+            const now = new Date();
+            const weeks = Array.from({ length: 8 }, (_, i) => {
+              const d = new Date(now);
+              d.setDate(d.getDate() - 7 * (7 - i));
+              d.setHours(0, 0, 0, 0);
+              d.setDate(d.getDate() - d.getDay());
+              return d;
+            });
+            const weekBuckets = weeks.map(wStart => {
+              const wEnd = new Date(wStart); wEnd.setDate(wStart.getDate() + 7);
+              const rows = analyticsData.filter(r => { const t = new Date(r.created_at).getTime(); return t >= wStart.getTime() && t < wEnd.getTime(); });
+              return {
+                label: `${wStart.getDate()}/${wStart.getMonth() + 1}`,
+                total: rows.length,
+                victory: rows.filter(r => r.status === 'victory').length,
+              };
+            });
+            const maxWeek = Math.max(1, ...weekBuckets.map(w => w.total));
+
+            return (
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, gap: 16 }}>
+                <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 4 }}>Estadísticas del Ministerio</Text>
+
+                {/* ROW 1 — Metric cards */}
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  {[
+                    { label: 'Total peticiones',    val: String(total),         color: '#a78bfa' },
+                    { label: 'Tasa de victoria',    val: `${victoryRate}%`,     color: '#4ade80' },
+                    { label: 'Promedio en batalla', val: `${avgDays}d`,         color: '#60a5fa' },
+                    { label: 'Países alcanzados',   val: String(countriesSet.size), color: '#fbbf24' },
+                  ].map(m => (
+                    <View key={m.label} style={[w.statCard, { flex: 1 }]}>
+                      <Text style={[w.statNum, { color: m.color, fontSize: 32 }]}>{m.val}</Text>
+                      <Text style={w.statLbl}>{m.label}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* ROW 2 — Category bars + Country list */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {/* Category bar chart */}
+                  <View style={[w.card, { flex: 1, padding: 20 }]}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 16 }}>Por categoría</Text>
+                    {NEW_CATS.map(cat => {
+                      const cnt = byCategory[cat] ?? 0;
+                      const pct = cnt / maxCat;
+                      return (
+                        <View key={cat} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                          <Text style={{ color: '#64748b', fontSize: 12, width: 72 }}>
+                            {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                          </Text>
+                          <View style={{ flex: 1, backgroundColor: '#1e1b4b', borderRadius: 4, height: 28, overflow: 'hidden' }}>
+                            <View style={{ width: `${Math.max(pct * 100, cnt > 0 ? 4 : 0)}%` as any, backgroundColor: CAT_COLORS[cat] ?? '#7c3aed', height: 28, borderRadius: 4 }} />
+                          </View>
+                          <Text style={{ color: '#64748b', fontSize: 13, width: 28, textAlign: 'right' }}>{cnt}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+
+                  {/* Country list */}
+                  <View style={[w.card, { flex: 1, padding: 20 }]}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 16 }}>Países alcanzados</Text>
+                    {sortedCountries.length === 0 && (
+                      <Text style={{ color: '#334155', fontSize: 13 }}>Sin datos de país</Text>
+                    )}
+                    {sortedCountries.map(([code, cnt]) => (
+                      <View key={code} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <Text style={{ fontSize: 18, width: 28 }}>{toFlag(code)}</Text>
+                        <Text style={{ color: '#64748b', fontSize: 12, width: 30 }}>{code}</Text>
+                        <View style={{ flex: 1, backgroundColor: '#1e1b4b', borderRadius: 4, height: 20, overflow: 'hidden' }}>
+                          <View style={{ width: `${((cnt as number) / maxCountry) * 100}%` as any, backgroundColor: '#3b82f6', height: 20, borderRadius: 4 }} />
+                        </View>
+                        <Text style={{ color: '#64748b', fontSize: 12, width: 24, textAlign: 'right' }}>{cnt as number}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* ROW 3 — 8-week timeline */}
+                <View style={[w.card, { padding: 20 }]}>
+                  <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 20 }}>Últimas 8 semanas</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 100 }}>
+                    {weekBuckets.map((wk, i) => {
+                      const barH = Math.max(4, (wk.total / maxWeek) * 80);
+                      const vicH = wk.total > 0 ? (wk.victory / wk.total) * barH : 0;
+                      return (
+                        <View key={i} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                          {wk.total > 0 && (
+                            <Text style={{ color: '#475569', fontSize: 10 }}>{wk.total}</Text>
+                          )}
+                          <View style={{ width: '100%', height: barH, borderRadius: 4, overflow: 'hidden', backgroundColor: '#1e1b4b' }}>
+                            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: vicH, backgroundColor: '#f59e0b', borderRadius: 4 }} />
+                            <View style={{ position: 'absolute', bottom: vicH, left: 0, right: 0, height: barH - vicH, backgroundColor: '#7c3aed', borderTopLeftRadius: 4, borderTopRightRadius: 4 }} />
+                          </View>
+                          <Text style={{ color: '#334155', fontSize: 9 }}>{wk.label}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: '#7c3aed' }} />
+                      <Text style={{ color: '#475569', fontSize: 11 }}>Peticiones</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: '#f59e0b' }} />
+                      <Text style={{ color: '#475569', fontSize: 11 }}>Victorias</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* ROW 4 — Intercessors + Recent victories */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {/* Top intercessors */}
+                  <View style={[w.card, { flex: 1, padding: 20 }]}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 16 }}>Intercesores activos</Text>
+                    {topIntercessors.length === 0 && (
+                      <Text style={{ color: '#334155', fontSize: 13 }}>Sin asignaciones aún</Text>
+                    )}
+                    {topIntercessors.map((inter, i) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                        <View style={[w.assignedAvatarBig, { width: 36, height: 36, borderRadius: 18 }]}>
+                          <Text style={[w.assignedAvatarTxt, { fontSize: 12 }]}>{getInitials(inter.name)}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: '#e2e8f0', fontWeight: '600', fontSize: 13 }}>{inter.name}</Text>
+                          <Text style={{ color: '#475569', fontSize: 11, marginTop: 1 }}>{inter.count} peticiones asignadas</Text>
+                        </View>
+                        <View style={[w.badge, { backgroundColor: '#14532d22', borderColor: '#4ade8044' }]}>
+                          <Text style={[w.badgeTxt, { color: '#4ade80' }]}>activo</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* Recent victories */}
+                  <View style={[w.card, { flex: 1, padding: 20 }]}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 16 }}>🏆 Victorias recientes</Text>
+                    {recentVictories.length === 0 && (
+                      <Text style={{ color: '#334155', fontSize: 13 }}>Sin victorias registradas aún</Text>
+                    )}
+                    {recentVictories.map((r, i) => {
+                      const days = r.created_at
+                        ? Math.round((new Date(r.victory_date).getTime() - new Date(r.created_at).getTime()) / 86400000)
+                        : null;
+                      return (
+                        <View key={i} style={{ borderWidth: 1, borderColor: '#fbbf2444', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <Text style={{ fontSize: 14 }}>🏆</Text>
+                            <View style={[w.badge, { backgroundColor: (CAT_COLORS[r.category] ?? '#7c3aed') + '22', borderColor: (CAT_COLORS[r.category] ?? '#7c3aed') + '55' }]}>
+                              <Text style={[w.badgeTxt, { color: CAT_COLORS[r.category] ?? '#7c3aed' }]}>
+                                {r.category ? r.category.charAt(0).toUpperCase() + r.category.slice(1) : 'Otro'}
+                              </Text>
+                            </View>
+                            {days !== null && (
+                              <Text style={{ color: '#fbbf24', fontSize: 11, marginLeft: 'auto' as any }}>{days}d en batalla</Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {/* ROW 5 — Sermon AI suggestion */}
+                <View style={[w.card, { padding: 20 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15 }}>✨ Sugerencia de Sermón IA</Text>
+                    <Pressable
+                      style={({ pressed }) => [w.aiBtn, pressed && { opacity: 0.8 }, sermonLoading && { opacity: 0.6 }]}
+                      disabled={sermonLoading || analyticsLoading}
+                      onPress={() => {
+                        const totalReqs = analyticsData.length;
+                        const victoryReqs = analyticsData.filter((r: any) => r.status === 'victory').length;
+                        const urgentReqs = analyticsData.filter((r: any) => r.urgent).length;
+                        const topCat = Object.entries(
+                          analyticsData.reduce((acc: any, r: any) => { if (r.category) acc[r.category] = (acc[r.category] ?? 0) + 1; return acc; }, {})
+                        ).sort((a: any, b: any) => (b[1] as number) - (a[1] as number))[0]?.[0] ?? 'otro';
+                        const ctx = `Congregación con ${totalReqs} peticiones. Victorias: ${victoryReqs}. Peticiones urgentes: ${urgentReqs}. Necesidad predominante: ${topCat}.`;
+                        setSermonLoading(true);
+                        setSermonSuggestion(null);
+                        getSermonSuggestion(ctx).then(s => { setSermonSuggestion(s); setSermonLoading(false); });
+                      }}
+                    >
+                      {sermonLoading
+                        ? <ActivityIndicator size="small" color="#a78bfa" />
+                        : <Text style={w.aiBtnTxt}>Generar</Text>}
+                    </Pressable>
+                  </View>
+                  {!sermonSuggestion && !sermonLoading && (
+                    <Text style={{ color: '#334155', fontSize: 13 }}>Presiona "Generar" para obtener una sugerencia de sermón basada en las necesidades actuales del rebaño.</Text>
+                  )}
+                  {sermonLoading && (
+                    <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                      <ActivityIndicator color="#7c3aed" />
+                      <Text style={{ color: '#475569', fontSize: 13, marginTop: 8 }}>Preparando sugerencia pastoral…</Text>
+                    </View>
+                  )}
+                  {sermonSuggestion && !sermonLoading && (
+                    <View style={w.aiCard}>
+                      <Text style={{ color: '#a78bfa', fontWeight: '700', fontSize: 16, marginBottom: 6 }}>{sermonSuggestion.title}</Text>
+                      <Text style={{ color: '#7c3aed', fontSize: 12, fontStyle: 'italic', marginBottom: 10 }}>{sermonSuggestion.verseRef}</Text>
+                      <Text style={{ color: '#cbd5e1', fontSize: 13, marginBottom: 14, lineHeight: 20 }}>"{sermonSuggestion.verse}"</Text>
+                      <Text style={{ color: '#64748b', fontWeight: '600', fontSize: 12, marginBottom: 8 }}>BOSQUEJO</Text>
+                      {sermonSuggestion.outline.map((point, i) => (
+                        <View key={i} style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
+                          <Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 13 }}>{i + 1}.</Text>
+                          <Text style={{ color: '#cbd5e1', fontSize: 13, flex: 1 }}>{point}</Text>
+                        </View>
+                      ))}
+                      <View style={{ borderTopWidth: 1, borderTopColor: 'rgba(124,58,237,0.2)', marginTop: 10, paddingTop: 10 }}>
+                        <Text style={{ color: '#a78bfa', fontSize: 12, fontStyle: 'italic' }}>{sermonSuggestion.encouragement}</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                {/* ROW 6 — Flock insight (auto-generated) */}
+                <View style={[w.card, { padding: 20 }]}>
+                  <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 12 }}>🕊️ Perspectiva Pastoral del Rebaño</Text>
+                  {flockInsightLoading && (
+                    <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+                      <ActivityIndicator color="#7c3aed" />
+                      <Text style={{ color: '#475569', fontSize: 13, marginTop: 8 }}>Analizando el estado espiritual…</Text>
+                    </View>
+                  )}
+                  {!flockInsight && !flockInsightLoading && analyticsData.length === 0 && (
+                    <Text style={{ color: '#334155', fontSize: 13 }}>Sin datos suficientes para generar una perspectiva.</Text>
+                  )}
+                  {flockInsight && !flockInsightLoading && (
+                    <View style={w.aiCard}>
+                      <Text style={{ color: '#e2e8f0', fontSize: 14, lineHeight: 22, marginBottom: 14 }}>{flockInsight.insight}</Text>
+                      <View style={{ borderLeftWidth: 3, borderLeftColor: '#7c3aed', paddingLeft: 12 }}>
+                        <Text style={{ color: '#a78bfa', fontSize: 13, fontStyle: 'italic', lineHeight: 20 }}>"{flockInsight.verse}"</Text>
+                        <Text style={{ color: '#7c3aed', fontSize: 12, marginTop: 4 }}>— {flockInsight.verseRef}</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+              </ScrollView>
+            );
+          })()
+
         ) : (
         /* ══ NORMAL COLUMNS ══ */
         <View style={w.columns}>
@@ -1509,6 +2294,56 @@ function WebCRM() {
                 <Pressable style={w.whatsappBtn} onPress={() => Linking.openURL('https://wa.me/')}>
                   <Text style={w.whatsappTxt}>📲 Contactar por WhatsApp</Text>
                 </Pressable>
+
+                {/* ✨ AI Suggestion button */}
+                <Pressable
+                  style={{ backgroundColor: 'rgba(124,58,237,0.08)', borderWidth: 1, borderColor: 'rgba(124,58,237,0.2)', borderRadius: 12, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 12, flexDirection: 'row', gap: 6 }}
+                  onPress={async () => {
+                    setAiLoading(true);
+                    setAiSuggestion(null);
+                    const result = await getAISuggestion(selected.content, selected.category ?? 'otro', 'pastor');
+                    setAiSuggestion(result);
+                    setAiLoading(false);
+                  }}
+                  disabled={aiLoading}
+                >
+                  {aiLoading && <ActivityIndicator color="#a78bfa" size="small" />}
+                  <Text style={{ color: '#a78bfa', fontSize: 13, fontWeight: '500' }}>
+                    {aiLoading ? 'Consultando IA…' : '✨ Sugerencia IA'}
+                  </Text>
+                </Pressable>
+
+                {/* AI result card */}
+                {aiSuggestion && (
+                  <View style={[w.aiCard, { marginBottom: 12 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                      <Text style={{ fontSize: 14 }}>✨</Text>
+                      <Text style={{ color: '#a78bfa', fontSize: 14, fontWeight: '600' }}>Sugerencia pastoral</Text>
+                    </View>
+                    <View style={{ backgroundColor: 'rgba(124,58,237,0.08)', borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                      <Text style={{ color: '#c4b5fd', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
+                        {aiSuggestion.verse}
+                      </Text>
+                      <Text style={{ color: '#7c3aed', fontSize: 12, textAlign: 'right', marginTop: 6 }}>
+                        {aiSuggestion.verseRef}
+                      </Text>
+                    </View>
+                    <Text style={[w.sectionLbl, { marginBottom: 4 }]}>ORACIÓN SUGERIDA</Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 13, lineHeight: 20, marginBottom: 12 }}>
+                      {aiSuggestion.prayer}
+                    </Text>
+                    <Pressable
+                      style={{ backgroundColor: '#1e1b4b', borderRadius: 8, height: 36, alignItems: 'center', justifyContent: 'center' }}
+                      onPress={() => setNote(prev =>
+                        prev
+                          ? `${prev}\n\n${aiSuggestion.verseRef}: ${aiSuggestion.verse}\n\n${aiSuggestion.prayer}`
+                          : `${aiSuggestion.verseRef}: ${aiSuggestion.verse}\n\n${aiSuggestion.prayer}`
+                      )}
+                    >
+                      <Text style={{ color: '#a78bfa', fontSize: 13, fontWeight: '600' }}>Copiar como nota pastoral</Text>
+                    </Pressable>
+                  </View>
+                )}
 
                 {/* Marcar Victoria */}
                 <Pressable
@@ -2111,6 +2946,11 @@ const w = StyleSheet.create({
   whatsappTxt:  { color: '#4ade80', fontSize: 15, fontWeight: '600' },
   victoriaBtn:  { backgroundColor: '#92400e', borderRadius: 12, height: 52, alignItems: 'center', justifyContent: 'center' },
   victoriaTxt:  { color: '#fbbf24', fontSize: 16, fontWeight: '600' },
+
+  // AI card
+  aiCard:       { backgroundColor: '#0f0f1a', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(124,58,237,0.3)' },
+  aiBtn:        { backgroundColor: 'rgba(124,58,237,0.15)', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(124,58,237,0.4)', alignItems: 'center', justifyContent: 'center' },
+  aiBtnTxt:     { color: '#a78bfa', fontSize: 13, fontWeight: '600' },
 });
 
 // ─────────────────────────────────────────────────────────────
