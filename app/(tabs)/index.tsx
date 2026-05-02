@@ -119,6 +119,16 @@ function WebCRM() {
   const [submitErr,    setSubmitErr]    = useState('');
   const [noteSaving,   setNoteSaving]   = useState(false);
 
+  // Current user identity
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [currentUserName, setCurrentUserName] = useState('');
+  const [roleLoading,     setRoleLoading]     = useState(true);
+
+  // Ajustes — role management
+  const [allProfiles,     setAllProfiles]     = useState<any[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [roleUpdating,    setRoleUpdating]    = useState<string | null>(null);
+
   // Intercesores panel
   const [intercessors,    setIntercessors]    = useState<any[]>([]);
   const [interLoading,    setInterLoading]    = useState(false);
@@ -130,6 +140,40 @@ function WebCRM() {
   const [interNota,       setInterNota]       = useState('');
   const [interSubmitting, setInterSubmitting] = useState(false);
   const [interErr,        setInterErr]        = useState('');
+
+  // Fetch current user's profile role on mount
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) { setRoleLoading(false); return; }
+      const { data } = await supabase
+        .from('profiles')
+        .select('full_name, role')
+        .eq('id', user.id)
+        .single();
+      setCurrentUserRole(data?.role ?? 'member');
+      setCurrentUserName(data?.full_name ?? user.email?.split('@')[0] ?? '');
+      setRoleLoading(false);
+    });
+  }, []);
+
+  // Fetch all profiles for Ajustes panel
+  useEffect(() => {
+    if (activeNav === 'ajustes') {
+      setProfilesLoading(true);
+      supabase
+        .from('profiles')
+        .select('id, full_name, role, email')
+        .order('full_name')
+        .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
+    }
+  }, [activeNav]);
+
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    setRoleUpdating(userId);
+    await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    setAllProfiles(prev => prev.map(p => p.id === userId ? { ...p, role: newRole } : p));
+    setRoleUpdating(null);
+  };
 
   // Fetch intercessors when panel becomes active
   useEffect(() => {
@@ -240,6 +284,34 @@ function WebCRM() {
   const selectedCatColor = selected ? (CAT_COLORS[selected.category ?? ''] ?? '#7c3aed') : '#7c3aed';
   const statusStep = selected ? getStatusStep(selected) : 0;
 
+  // ── Role gate ──
+  if (roleLoading) {
+    return (
+      <View style={[w.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color="#7c3aed" size="large" />
+      </View>
+    );
+  }
+
+  // Members see a personal prayer placeholder (pastor assigns CRM access)
+  if (currentUserRole !== 'pastor') {
+    return (
+      <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 16 }]}>
+        <Ionicons name="shield" size={52} color="#7c3aed" />
+        <Text style={{ color: '#e2e8f0', fontSize: 20, fontWeight: '700' }}>Bienvenido, {currentUserName}</Text>
+        <Text style={{ color: '#475569', fontSize: 14, textAlign: 'center', maxWidth: 320 }}>
+          Tu cuenta está activa. El pastor de tu ministerio te asignará acceso al War Room.
+        </Text>
+        <Pressable
+          style={{ marginTop: 16, backgroundColor: '#1e1b4b', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12 }}
+          onPress={() => supabase.auth.signOut()}
+        >
+          <Text style={{ color: '#a78bfa', fontWeight: '600' }}>Cerrar sesión</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={w.root}>
 
@@ -252,11 +324,11 @@ function WebCRM() {
 
         <View style={w.pastorRow}>
           <View style={w.pastorAvatar}>
-            <Text style={w.pastorAvatarTxt}>PR</Text>
+            <Text style={w.pastorAvatarTxt}>{getInitials(currentUserName || 'PR')}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={w.pastorName}>Pastor</Text>
-            <Text style={w.pastorSub}>Administrador</Text>
+            <Text style={w.pastorName}>{currentUserName || 'Pastor'}</Text>
+            <Text style={w.pastorSub}>{currentUserRole ?? 'pastor'}</Text>
           </View>
         </View>
 
@@ -452,11 +524,109 @@ function WebCRM() {
           </View>
 
         ) : activeNav === 'ajustes' ? (
-          /* ══ AJUSTES PANEL ══ */
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 }}>
-            <Ionicons name="settings-outline" size={56} color="#1e293b" />
-            <Text style={{ color: '#334155', fontSize: 16, fontWeight: '500' }}>Ajustes del ministerio</Text>
-            <Text style={{ color: '#1e293b', fontSize: 13 }}>Próximamente disponible</Text>
+          /* ══ AJUSTES — GESTIÓN DE ROLES ══ */
+          <View style={{ flex: 1, flexDirection: 'row' }}>
+            {/* Profile list */}
+            <View style={[w.feed, { borderRightWidth: 0 }]}>
+              <View style={w.feedTopBar}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600' }}>Gestión de Roles</Text>
+                  <Text style={{ color: '#475569', fontSize: 12, marginTop: 2 }}>
+                    Solo pastores pueden cambiar roles
+                  </Text>
+                </View>
+                <Pressable
+                  style={{ padding: 8 }}
+                  onPress={() => {
+                    setProfilesLoading(true);
+                    supabase.from('profiles').select('id, full_name, role, email').order('full_name')
+                      .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
+                  }}
+                >
+                  <Ionicons name="refresh-outline" size={18} color="#475569" />
+                </Pressable>
+              </View>
+
+              {profilesLoading ? (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator color="#7c3aed" />
+                </View>
+              ) : (
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 8 }}>
+                  {allProfiles.length === 0 && (
+                    <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
+                      <Ionicons name="people-outline" size={44} color="#1e293b" />
+                      <Text style={{ color: '#334155', fontSize: 14 }}>Sin perfiles registrados</Text>
+                    </View>
+                  )}
+                  {allProfiles.map((p: any) => {
+                    const ROLES = ['member', 'intercessor', 'pastor'] as const;
+                    const roleBadgeColors: Record<string, string> = {
+                      pastor:      '#7c3aed',
+                      intercessor: '#2563eb',
+                      member:      '#475569',
+                    };
+                    const badgeColor = roleBadgeColors[p.role] ?? '#475569';
+                    const isUpdating = roleUpdating === p.id;
+                    return (
+                      <View
+                        key={p.id}
+                        style={[w.card, { flexDirection: 'row', alignItems: 'center', gap: 14 }]}
+                      >
+                        {/* Avatar */}
+                        <View style={[w.assignedAvatarBig, { width: 40, height: 40, borderRadius: 20 }]}>
+                          <Text style={[w.assignedAvatarTxt, { fontSize: 14 }]}>
+                            {getInitials(p.full_name ?? '?')}
+                          </Text>
+                        </View>
+
+                        {/* Name + email */}
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: '#e2e8f0', fontWeight: '600', fontSize: 14 }}>
+                            {p.full_name ?? 'Sin nombre'}
+                          </Text>
+                          <Text style={{ color: '#475569', fontSize: 11, marginTop: 1 }}>
+                            {p.email ?? ''}
+                          </Text>
+                        </View>
+
+                        {/* Current role badge */}
+                        <View style={[w.badge, { backgroundColor: badgeColor + '22', borderColor: badgeColor + '55' }]}>
+                          <Text style={[w.badgeTxt, { color: badgeColor }]}>{p.role ?? 'member'}</Text>
+                        </View>
+
+                        {/* Role selector pills */}
+                        {isUpdating ? (
+                          <ActivityIndicator color="#7c3aed" size="small" />
+                        ) : (
+                          <View style={{ flexDirection: 'row', gap: 4 }}>
+                            {ROLES.map(r => (
+                              <Pressable
+                                key={r}
+                                style={[
+                                  w.catPill,
+                                  p.role === r && w.catPillActive,
+                                  { paddingHorizontal: 8, paddingVertical: 4 },
+                                ]}
+                                onPress={() => p.role !== r && handleRoleChange(p.id, r)}
+                              >
+                                <Text style={[
+                                  w.catPillTxt,
+                                  p.role === r && { color: '#fff' },
+                                  { fontSize: 11 },
+                                ]}>
+                                  {r === 'member' ? 'Miembro' : r === 'intercessor' ? 'Intercesor' : 'Pastor'}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
           </View>
 
         ) : (

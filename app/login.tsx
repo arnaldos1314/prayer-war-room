@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 
 type AuthTab = 'login' | 'register';
-type Role    = 'miembro' | 'pastor';
 
 export default function LoginScreen() {
   const [authTab,         setAuthTab]         = useState<AuthTab>('login');
@@ -25,7 +24,6 @@ export default function LoginScreen() {
   const [password,        setPassword]        = useState('');
   const [nombre,          setNombre]          = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role,            setRole]            = useState<Role>('miembro');
   const [loading,         setLoading]         = useState(false);
   const [cachedName,      setCachedName]      = useState<string | null>(null);
 
@@ -92,16 +90,14 @@ export default function LoginScreen() {
     if (!validateRegister()) return;
     setLoading(true);
     try {
+      // All users register as 'member'. Role is assigned by pastor from CRM.
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
-        options: { data: { full_name: nombre.trim(), role } },
+        options: { data: { full_name: nombre.trim(), role: 'member' } },
       });
       if (error) throw error;
       await AsyncStorage.setItem('@war_room_cached_name', nombre.trim());
-      if (role === 'pastor') await AsyncStorage.setItem('@war_room_role', 'pastor');
-      // If Supabase auto-confirms (e.g. dev mode), navigate immediately.
-      // Otherwise show confirmation message and let _layout handle SIGNED_IN event.
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         router.replace('/(tabs)');
@@ -140,7 +136,25 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
 
-          {/* ── Tab switcher — top of screen ── */}
+          {/* ══════════════════════════
+              HERO  (always visible)
+          ══════════════════════════ */}
+          <View style={s.heroWrap}>
+            {/* Subtle radial glow behind the shield */}
+            <View style={s.glow} />
+            <Ionicons name="shield" size={48} color="#7c3aed" />
+            <Text style={s.heroTitle}>War Room</Text>
+            <Text style={s.heroTagline}>
+              El ministerio de oración de tu iglesia,{'\n'}ordenado y en un solo lugar.
+            </Text>
+          </View>
+
+          {/* ── Thin divider ── */}
+          <View style={s.heroDivider} />
+
+          {/* ══════════════════════════
+              TAB SWITCHER
+          ══════════════════════════ */}
           <View style={s.tabRow}>
             <Pressable
               style={[s.tabPill, authTab === 'login' && s.tabPillActive]}
@@ -156,27 +170,13 @@ export default function LoginScreen() {
             </Pressable>
           </View>
 
-          {/* ── Shield + Brand ── */}
-          <View style={s.brand}>
-            <Ionicons name="shield" size={40} color="#7c3aed" />
-            <Text style={s.brandName}>
-              My <Text style={s.brandWar}>War</Text> Room
-            </Text>
-            <Text style={s.brandSub}>TU ESPACIO DE ORACIÓN</Text>
-          </View>
-
-          {/* ── Verse ── */}
-          <Text style={s.verse}>
-            {'"No os ha sobrevenido ninguna tentación que no sea humana;\npero fiel es Dios…"\n— 1 Corintios 10:13'}
-          </Text>
-
           {/* ══════════════════════════
               ENTRAR TAB
           ══════════════════════════ */}
           {authTab === 'login' && (
             <>
               {cachedName ? (
-                <Text style={s.welcome}>Bienvenida de nuevo, {cachedName} 🙏</Text>
+                <Text style={s.welcome}>Bienvenido de nuevo, {cachedName} 🙏</Text>
               ) : null}
 
               <TextInput
@@ -220,7 +220,7 @@ export default function LoginScreen() {
                 <View style={s.divLine} />
               </View>
 
-              {/* Apple — iOS only, first per Apple requirement */}
+              {/* Apple — iOS only */}
               {Platform.OS === 'ios' && (
                 <Pressable style={s.socialBtn} disabled>
                   <Text style={s.appleLogo}></Text>
@@ -292,22 +292,6 @@ export default function LoginScreen() {
               />
               {confirmErr ? <Text style={s.fieldErr}>{confirmErr}</Text> : null}
 
-              {/* Role selector */}
-              <View style={s.roleRow}>
-                <Pressable
-                  style={[s.roleBtn, role === 'miembro' && s.roleBtnSel]}
-                  onPress={() => setRole('miembro')}
-                >
-                  <Text style={[s.roleBtnTxt, role === 'miembro' && s.roleBtnTxtSel]}>👤 Miembro</Text>
-                </Pressable>
-                <Pressable
-                  style={[s.roleBtn, role === 'pastor' && s.roleBtnSel]}
-                  onPress={() => setRole('pastor')}
-                >
-                  <Text style={[s.roleBtnTxt, role === 'pastor' && s.roleBtnTxtSel]}>✝ Pastor · Líder</Text>
-                </Pressable>
-              </View>
-
               {msg ? <Text style={[s.msg, msgOk && s.msgOk]}>{msg}</Text> : null}
 
               <Pressable
@@ -317,7 +301,7 @@ export default function LoginScreen() {
               >
                 {loading
                   ? <ActivityIndicator color="#fff" />
-                  : <Text style={s.primaryBtnTxt}>{msgOk ? '¡Cuenta creada! ✓' : 'Crear mi War Room'}</Text>}
+                  : <Text style={s.primaryBtnTxt}>{msgOk ? '¡Cuenta creada! ✓' : 'Crear mi cuenta'}</Text>}
               </Pressable>
 
               <Pressable onPress={() => switchTab('login')} style={s.linkRow}>
@@ -334,37 +318,57 @@ export default function LoginScreen() {
 
 const s = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: '#020617' },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 28, paddingTop: 32, paddingBottom: 48 },
+  scroll: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 24, paddingBottom: 48 },
 
-  // Tab switcher
+  // ── Hero ──
+  heroWrap: {
+    alignItems: 'center',
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  glow: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(124,58,237,0.08)',
+    top: 0,
+    alignSelf: 'center',
+  },
+  heroTitle: {
+    fontSize: 32,
+    fontFamily: 'serif',
+    fontWeight: '700',
+    color: '#f8fafc',
+    marginTop: 16,
+    letterSpacing: -0.5,
+  },
+  heroTagline: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: 8,
+    paddingHorizontal: 20,
+  },
+  heroDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginVertical: 24,
+  },
+
+  // ── Tab switcher ──
   tabRow: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 12,
     padding: 4,
     marginBottom: 24,
-    marginTop: 16,
   },
   tabPill:          { flex: 1, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10, alignItems: 'center' },
   tabPillActive:    { backgroundColor: '#7c3aed' },
   tabPillTxt:       { fontSize: 15, color: '#64748b' },
   tabPillTxtActive: { color: '#fff', fontWeight: '600', fontSize: 15 },
-
-  // Brand
-  brand:     { alignItems: 'center', marginBottom: 12 },
-  brandName: { fontSize: 32, fontFamily: 'serif', fontWeight: '700', color: '#f8fafc', textAlign: 'center', marginTop: 12 },
-  brandWar:  { color: '#a78bfa' },
-  brandSub:  { fontSize: 11, color: '#6b7280', textAlign: 'center', letterSpacing: 4, marginTop: 6, fontWeight: '500' },
-
-  // Verse
-  verse: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    color: '#475569',
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 24,
-  },
 
   // Welcome back
   welcome: { fontSize: 14, color: '#a78bfa', textAlign: 'center', fontStyle: 'italic', marginBottom: 16 },
@@ -425,18 +429,4 @@ const s = StyleSheet.create({
   linkRow:   { alignItems: 'center', paddingVertical: 10 },
   forgotTxt: { color: '#6d28d9', fontSize: 13 },
   switchTxt: { color: '#475569', fontSize: 13 },
-
-  // Role selector
-  roleRow: { flexDirection: 'row', gap: 10, marginTop: 4, marginBottom: 16 },
-  roleBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-    alignItems: 'center',
-  },
-  roleBtnSel:    { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
-  roleBtnTxt:    { color: '#94a3b8', fontSize: 14, fontWeight: '600' },
-  roleBtnTxtSel: { color: '#fff' },
 });
