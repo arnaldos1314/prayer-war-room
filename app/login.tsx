@@ -91,15 +91,20 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       // All users register as 'member'. Role is assigned by pastor from CRM.
-      const { error } = await supabase.auth.signUp({
+      const { error, data } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: { data: { full_name: nombre.trim(), role: 'member' } },
       });
       if (error) throw error;
-      await AsyncStorage.setItem('@war_room_cached_name', nombre.trim());
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+      if (data.user) {
+        // Upsert profile so full_name is immediately available in the profiles table
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          full_name: nombre.trim(),
+          role: 'member',
+        });
+        await AsyncStorage.setItem('@war_room_cached_name', nombre.trim());
         router.replace('/(tabs)');
       } else {
         setMsgOk(true);

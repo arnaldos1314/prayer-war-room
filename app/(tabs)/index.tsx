@@ -67,11 +67,12 @@ const getStatusStep = (r: PrayerRequest): number => {
 };
 
 const WEB_NAV = [
-  { icon: 'mail-outline',     label: 'Bandeja',      key: 'incoming'     },
-  { icon: 'shield-outline',   label: 'En Batalla',   key: 'in_battle'    },
-  { icon: 'trophy-outline',   label: 'Victorias',    key: 'victory'      },
-  { icon: 'people-outline',   label: 'Intercesores', key: 'intercesores' },
-  { icon: 'settings-outline', label: 'Ajustes',      key: 'ajustes'      },
+  { icon: 'mail-outline',          label: 'Bandeja',          key: 'incoming'     },
+  { icon: 'shield-outline',        label: 'En Batalla',       key: 'in_battle'    },
+  { icon: 'trophy-outline',        label: 'Victorias',        key: 'victory'      },
+  { icon: 'people-circle-outline', label: 'Pared de Oración', key: 'wall'         },
+  { icon: 'people-outline',        label: 'Intercesores',     key: 'intercesores' },
+  { icon: 'settings-outline',      label: 'Ajustes',          key: 'ajustes'      },
 ] as const;
 type NavKey = typeof WEB_NAV[number]['key'];
 
@@ -141,19 +142,64 @@ function WebCRM() {
   const [interSubmitting, setInterSubmitting] = useState(false);
   const [interErr,        setInterErr]        = useState('');
 
+  // Profile completion (PART 2)
+  const [profileComplete,  setProfileComplete]  = useState(true);
+  const [profileNombre,    setProfileNombre]    = useState('');
+  const [profileIglesia,   setProfileIglesia]   = useState('');
+  const [profilePaisSetup, setProfilePaisSetup] = useState('');
+  const [profileSaving,    setProfileSaving]    = useState(false);
+  const [profileErr,       setProfileErr]       = useState('');
+  const [currentUserId,    setCurrentUserId]    = useState<string | null>(null);
+
+  // Prayer Wall (PART 3)
+  const [wallRequests,     setWallRequests]     = useState<any[]>([]);
+  const [wallLoading,      setWallLoading]      = useState(false);
+  const [wallTab,          setWallTab]          = useState<'approved' | 'pending'>('approved');
+  const [wallPendingCount, setWallPendingCount] = useState(0);
+
+  // Visibility selector in new form (PART 4)
+  const [newVisibility,    setNewVisibility]    = useState<'private' | 'circle' | 'congregation'>('congregation');
+  const [newAnonymous,     setNewAnonymous]     = useState(false);
+
+  // Member personal view (PART 5)
+  const [memberCircle,     setMemberCircle]     = useState<'personal' | 'family' | 'friends' | 'ministry'>('personal');
+  const [memberPrayers,    setMemberPrayers]    = useState<any[]>([]);
+  const [memberLoading,    setMemberLoading]    = useState(false);
+  const [memberShowForm,   setMemberShowForm]   = useState(false);
+  const [memberContent,    setMemberContent]    = useState('');
+  const [memberCat,        setMemberCat]        = useState('salud');
+  const [memberVisibility, setMemberVisibility] = useState<'private' | 'circle' | 'congregation'>('private');
+  const [memberAnonymous,  setMemberAnonymous]  = useState(false);
+  const [memberUrgent,     setMemberUrgent]     = useState(false);
+  const [memberSubmitting, setMemberSubmitting] = useState(false);
+  const [memberErr,        setMemberErr]        = useState('');
+
   // Fetch current user's profile role on mount
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { setRoleLoading(false); return; }
+      setCurrentUserId(user.id);
       const { data } = await supabase
         .from('profiles')
         .select('full_name, role')
         .eq('id', user.id)
         .single();
       setCurrentUserRole(data?.role ?? 'member');
-      setCurrentUserName(data?.full_name ?? user.email?.split('@')[0] ?? '');
+      const name = data?.full_name ?? user.email?.split('@')[0] ?? '';
+      setCurrentUserName(name);
+      if (!data?.full_name) setProfileComplete(false);
       setRoleLoading(false);
     });
+  }, []);
+
+  // Initial wall pending count (for sidebar badge)
+  useEffect(() => {
+    supabase
+      .from('prayer_requests')
+      .select('id')
+      .eq('wall_pending', true)
+      .eq('wall_approved', false)
+      .then(({ data }) => setWallPendingCount((data ?? []).length));
   }, []);
 
   // Fetch all profiles for Ajustes panel
@@ -187,6 +233,24 @@ function WebCRM() {
     }
   }, [activeNav]);
 
+  // Fetch wall requests when panel becomes active
+  useEffect(() => {
+    if (activeNav === 'wall') {
+      setWallLoading(true);
+      supabase
+        .from('prayer_requests')
+        .select('*')
+        .or('wall_approved.eq.true,wall_pending.eq.true')
+        .order('created_at', { ascending: false })
+        .then(({ data }) => {
+          const all = (data ?? []) as any[];
+          setWallRequests(all);
+          setWallPendingCount(all.filter((r: any) => r.wall_pending && !r.wall_approved).length);
+          setWallLoading(false);
+        });
+    }
+  }, [activeNav]);
+
   const handleAddIntercessor = async () => {
     if (!interName.trim() || !interEmail.trim()) { setInterErr('Nombre y email son requeridos.'); return; }
     setInterSubmitting(true); setInterErr('');
@@ -206,6 +270,103 @@ function WebCRM() {
       setInterErr(err.message ?? 'Error al agregar');
     } finally {
       setInterSubmitting(false);
+    }
+  };
+
+  // ── Profile completion handler (PART 2) ──
+  const handleProfileSave = async () => {
+    if (!profileNombre.trim()) { setProfileErr('Ingresa tu nombre.'); return; }
+    setProfileSaving(true); setProfileErr('');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No autenticado');
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        full_name: profileNombre.trim(),
+        church: profileIglesia.trim() || null,
+        country: profilePaisSetup.trim() || null,
+      });
+      setCurrentUserName(profileNombre.trim());
+      setProfileComplete(true);
+    } catch (err: any) {
+      setProfileErr(err.message ?? 'Error al guardar');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  // ── Wall handlers (PART 3) ──
+  const handleWallApprove = async (id: string) => {
+    await supabase.from('prayer_requests').update({ wall_approved: true, wall_pending: false }).eq('id', id);
+    setWallRequests(prev => prev.map((r: any) => r.id === id ? { ...r, wall_approved: true, wall_pending: false } : r));
+    setWallPendingCount(prev => Math.max(0, prev - 1));
+  };
+
+  const handleWallReject = async (id: string) => {
+    await supabase.from('prayer_requests').update({ wall_approved: false, wall_pending: false }).eq('id', id);
+    setWallRequests(prev => prev.filter((r: any) => r.id !== id));
+    setWallPendingCount(prev => Math.max(0, prev - 1));
+  };
+
+  const handleWallPray = async (id: string) => {
+    const req = wallRequests.find((r: any) => r.id === id);
+    if (!req) return;
+    const newCount = (req.pray_count ?? 0) + 1;
+    setWallRequests(prev => prev.map((r: any) => r.id === id ? { ...r, pray_count: newCount } : r));
+    await supabase.from('prayer_requests').update({ pray_count: newCount }).eq('id', id);
+  };
+
+  // ── Member personal space handlers (PART 5) ──
+  const fetchMemberPrayers = useCallback(async () => {
+    if (!currentUserId) return;
+    setMemberLoading(true);
+    const spaceMap: Record<string, string> = { personal: 'personal', family: 'family', friends: 'family', ministry: 'ministry' };
+    const { data } = await supabase
+      .from('prayer_requests')
+      .select('*')
+      .eq('user_id', currentUserId)
+      .eq('space_type', spaceMap[memberCircle] ?? 'personal')
+      .order('created_at', { ascending: false });
+    setMemberPrayers(data ?? []);
+    setMemberLoading(false);
+  }, [currentUserId, memberCircle]);
+
+  useEffect(() => {
+    if (currentUserRole && currentUserRole !== 'pastor' && currentUserId) {
+      fetchMemberPrayers();
+    }
+  }, [memberCircle, currentUserRole, currentUserId, fetchMemberPrayers]);
+
+  const handleMemberSubmit = async () => {
+    if (!memberContent.trim()) { setMemberErr('Escribe tu petición.'); return; }
+    if (!currentUserId) return;
+    setMemberSubmitting(true); setMemberErr('');
+    try {
+      const spaceMap: Record<string, string> = { personal: 'personal', family: 'family', friends: 'family', ministry: 'ministry' };
+      await supabase.from('prayer_requests').insert({
+        user_id:      currentUserId,
+        space_type:   spaceMap[memberCircle] ?? 'personal',
+        category:     memberCat,
+        content:      memberContent.trim(),
+        urgent:       memberUrgent,
+        status:       'incoming',
+        visibility:   memberVisibility,
+        anonymous:    memberAnonymous,
+        wall_pending: memberVisibility === 'congregation',
+        wall_approved: false,
+        pray_count:   0,
+      });
+      setMemberContent(''); setMemberUrgent(false); setMemberCat('salud');
+      setMemberVisibility('private'); setMemberAnonymous(false);
+      setMemberShowForm(false);
+      fetchMemberPrayers();
+      if (memberVisibility === 'congregation') {
+        setWallPendingCount(prev => prev + 1);
+      }
+    } catch (err: any) {
+      setMemberErr(err.message ?? 'Error al guardar');
+    } finally {
+      setMemberSubmitting(false);
     }
   };
 
@@ -261,19 +422,26 @@ function WebCRM() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No autenticado');
       const { error } = await insertRequest({
-        user_id: user.id,
-        space_type: 'ministry',
-        category: newCat,
-        title:    newName.trim() || null,
-        content:  newContent.trim(),
+        user_id:      user.id,
+        space_type:   'ministry',
+        category:     newCat,
+        title:        newName.trim() || null,
+        content:      newContent.trim(),
         country_code: newCountry.toUpperCase().trim() || null,
-        urgent:   newUrgent,
-        status:   'incoming',
+        urgent:       newUrgent,
+        status:       'incoming',
+        visibility:   newVisibility,
+        anonymous:    newAnonymous,
+        wall_pending: newVisibility === 'congregation',
+        wall_approved: false,
+        pray_count:   0,
       });
       if (error) throw error;
       setNewName(''); setNewCountry(''); setNewCat('salud');
       setNewContent(''); setNewUrgent(false);
+      setNewVisibility('congregation'); setNewAnonymous(false);
       setShowNewForm(false);
+      if (newVisibility === 'congregation') setWallPendingCount(prev => prev + 1);
     } catch (err: any) {
       setSubmitErr(err.message ?? 'Error al guardar');
     } finally {
@@ -293,21 +461,271 @@ function WebCRM() {
     );
   }
 
-  // Members see a personal prayer placeholder (pastor assigns CRM access)
-  if (currentUserRole !== 'pastor') {
+  // PART 2 — Profile completion screen (shown when full_name is missing)
+  if (!profileComplete) {
     return (
-      <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 16 }]}>
-        <Ionicons name="shield" size={52} color="#7c3aed" />
-        <Text style={{ color: '#e2e8f0', fontSize: 20, fontWeight: '700' }}>Bienvenido, {currentUserName}</Text>
-        <Text style={{ color: '#475569', fontSize: 14, textAlign: 'center', maxWidth: 320 }}>
-          Tu cuenta está activa. El pastor de tu ministerio te asignará acceso al War Room.
-        </Text>
-        <Pressable
-          style={{ marginTop: 16, backgroundColor: '#1e1b4b', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12 }}
-          onPress={() => supabase.auth.signOut()}
-        >
-          <Text style={{ color: '#a78bfa', fontWeight: '600' }}>Cerrar sesión</Text>
-        </Pressable>
+      <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }]}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingVertical: 40, alignItems: 'center', maxWidth: 400, width: '100%', alignSelf: 'center' as any }}>
+          <Ionicons name="person-circle-outline" size={56} color="#7c3aed" />
+          <Text style={{ color: '#f8fafc', fontSize: 22, fontWeight: '700', marginTop: 16, marginBottom: 6 }}>Completa tu perfil</Text>
+          <Text style={{ color: '#475569', fontSize: 14, textAlign: 'center', marginBottom: 28 }}>
+            Antes de continuar, dinos cómo llamarte.
+          </Text>
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>NOMBRE COMPLETO *</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="Tu nombre completo"
+            placeholderTextColor="#475569"
+            value={profileNombre}
+            onChangeText={setProfileNombre}
+            autoCapitalize="words"
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>IGLESIA (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="Nombre de tu iglesia"
+            placeholderTextColor="#475569"
+            value={profileIglesia}
+            onChangeText={setProfileIglesia}
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>PAÍS (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 24, width: '100%' as any }]}
+            placeholder="CO, MX, US…"
+            placeholderTextColor="#475569"
+            value={profilePaisSetup}
+            onChangeText={t => setProfilePaisSetup(t.toUpperCase().slice(0, 2))}
+            maxLength={2}
+            autoCapitalize="characters"
+          />
+
+          {profileErr ? <Text style={{ color: '#f87171', fontSize: 12, marginBottom: 12 }}>{profileErr}</Text> : null}
+
+          <Pressable
+            style={[w.victoriaBtn, { backgroundColor: '#7c3aed', width: '100%' as any }]}
+            onPress={handleProfileSave}
+            disabled={profileSaving}
+          >
+            {profileSaving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Continuar →</Text>}
+          </Pressable>
+
+          <Pressable onPress={() => supabase.auth.signOut()} style={{ marginTop: 20 }}>
+            <Text style={{ color: '#334155', fontSize: 13 }}>Cerrar sesión</Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // PART 5 — Members see their personal prayer space
+  if (currentUserRole !== 'pastor') {
+    const MEMBER_CIRCLES = [
+      { key: 'personal',  label: 'Personal',   icon: 'person-outline',  color: '#7c3aed' },
+      { key: 'family',    label: 'Familia',     icon: 'home-outline',    color: '#2563eb' },
+      { key: 'friends',   label: 'Amigos',      icon: 'people-outline',  color: '#059669' },
+      { key: 'ministry',  label: 'Ministerio',  icon: 'shield-outline',  color: '#d97706' },
+    ] as const;
+    const VIS_OPTIONS = [
+      { key: 'private',      label: 'Privada',      desc: 'Solo yo',           icon: 'lock-closed-outline' },
+      { key: 'circle',       label: 'Mi círculo',   desc: 'Familia y amigos',  icon: 'people-outline' },
+      { key: 'congregation', label: 'Congregación', desc: 'Pared de oración',  icon: 'earth-outline' },
+    ] as const;
+
+    return (
+      <View style={w.root}>
+        {/* Sidebar */}
+        <View style={w.sidebar}>
+          <View style={w.sidebarBrand}>
+            <Ionicons name="shield" size={22} color="#7c3aed" />
+            <Text style={w.sidebarBrandTxt}>War Room</Text>
+          </View>
+          <View style={w.pastorRow}>
+            <View style={w.pastorAvatar}>
+              <Text style={w.pastorAvatarTxt}>{getInitials(currentUserName || 'ME')}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={w.pastorName}>{currentUserName || 'Hermano/a'}</Text>
+              <Text style={w.pastorSub}>Miembro</Text>
+            </View>
+          </View>
+          <View style={w.sidebarDivider} />
+          {MEMBER_CIRCLES.map(c => (
+            <Pressable
+              key={c.key}
+              style={[w.navItem, memberCircle === c.key && w.navItemActive]}
+              onPress={() => { setMemberCircle(c.key as any); setMemberShowForm(false); }}
+            >
+              <Ionicons name={c.icon as any} size={18} color={memberCircle === c.key ? '#a78bfa' : '#475569'} />
+              <Text style={[w.navLabel, memberCircle === c.key && w.navLabelActive]}>{c.label}</Text>
+            </Pressable>
+          ))}
+          <View style={{ flex: 1 }} />
+          <Pressable style={w.signOutBtn} onPress={() => supabase.auth.signOut()}>
+            <Ionicons name="log-out-outline" size={15} color="#475569" />
+            <Text style={w.signOutTxt}>Salir</Text>
+          </Pressable>
+        </View>
+
+        {/* Main area */}
+        <View style={{ flex: 1 }}>
+          <View style={[w.statsBar, { alignItems: 'center' }]}>
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', flex: 1 }}>
+              {MEMBER_CIRCLES.find(c => c.key === memberCircle)?.label ?? 'Personal'}
+            </Text>
+            <Pressable style={w.newBtn} onPress={() => setMemberShowForm(v => !v)}>
+              <Ionicons name={memberShowForm ? 'close' : 'add'} size={16} color="#fff" />
+              <Text style={w.newBtnTxt}>{memberShowForm ? 'Cancelar' : 'Nueva Petición'}</Text>
+            </Pressable>
+          </View>
+
+          <View style={w.columns}>
+            {/* Prayer list */}
+            <View style={w.feed}>
+              {memberLoading ? (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator color="#7c3aed" />
+                </View>
+              ) : (
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 8 }}>
+                  {memberPrayers.length === 0 && (
+                    <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
+                      <Ionicons name="heart-outline" size={44} color="#1e293b" />
+                      <Text style={{ color: '#334155', fontSize: 14 }}>No hay peticiones en este espacio</Text>
+                      <Text style={{ color: '#1e293b', fontSize: 12 }}>Toca "Nueva Petición" para agregar una</Text>
+                    </View>
+                  )}
+                  {memberPrayers.map((item: any) => (
+                    <View key={item.id} style={w.card}>
+                      <View style={[w.cardRow, { marginBottom: 8 }]}>
+                        <View style={[w.badge, { backgroundColor: (CAT_COLORS[item.category] ?? '#7c3aed') + '22', borderColor: (CAT_COLORS[item.category] ?? '#7c3aed') + '55' }]}>
+                          <Text style={[w.badgeTxt, { color: CAT_COLORS[item.category] ?? '#7c3aed' }]}>
+                            {item.category ? item.category.charAt(0).toUpperCase() + item.category.slice(1) : 'Otro'}
+                          </Text>
+                        </View>
+                        {item.urgent && <View style={w.urgentBadge}><Text style={w.urgentTxt}>⚡ URGENTE</Text></View>}
+                        <Text style={w.cardTime}>{timeAgo(item.created_at)}</Text>
+                      </View>
+                      <Text style={[w.cardExcerpt, { marginBottom: 8 }]}>{item.content}</Text>
+                      <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' as any }}>
+                        {item.visibility === 'congregation' && (
+                          <View style={[w.badge, { backgroundColor: '#0c4a6e22', borderColor: '#0284c755' }]}>
+                            <Text style={[w.badgeTxt, { color: '#38bdf8' }]}>
+                              {item.wall_approved ? '🌍 En pared' : item.wall_pending ? '⏳ Pendiente' : '🌍 Congregación'}
+                            </Text>
+                          </View>
+                        )}
+                        {item.status === 'victory' && (
+                          <View style={[w.badge, { backgroundColor: '#78350f22', borderColor: '#fbbf2455' }]}>
+                            <Text style={[w.badgeTxt, { color: '#fbbf24' }]}>🏆 Victoria</Text>
+                          </View>
+                        )}
+                        {(item.pray_count ?? 0) > 0 && (
+                          <View style={[w.badge, { backgroundColor: '#1e1b4b', borderColor: '#7c3aed44' }]}>
+                            <Text style={[w.badgeTxt, { color: '#a78bfa' }]}>🙏 {item.pray_count}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+
+            {/* Form panel */}
+            <View style={w.detail}>
+              {memberShowForm ? (
+                <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+                  <Text style={w.detailName}>Nueva Petición</Text>
+                  <Text style={{ color: '#475569', fontSize: 12, marginBottom: 20, marginTop: 4 }}>
+                    {MEMBER_CIRCLES.find(c => c.key === memberCircle)?.label}
+                  </Text>
+
+                  <Text style={w.sectionLbl}>CATEGORÍA</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' as any, gap: 8, marginBottom: 16 }}>
+                    {NEW_CATS.map(cat => (
+                      <Pressable key={cat} style={[w.catPill, memberCat === cat && w.catPillActive]} onPress={() => setMemberCat(cat)}>
+                        <Text style={[w.catPillTxt, memberCat === cat && { color: '#fff' }]}>
+                          {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <Text style={w.sectionLbl}>PETICIÓN</Text>
+                  <TextInput
+                    style={[w.noteInput as any, { minHeight: 100, marginBottom: 16 }]}
+                    placeholder="Escribe tu petición…"
+                    placeholderTextColor="#475569"
+                    value={memberContent}
+                    onChangeText={setMemberContent}
+                    multiline
+                    textAlignVertical="top"
+                  />
+
+                  <Text style={w.sectionLbl}>VISIBILIDAD</Text>
+                  {VIS_OPTIONS.map(v => (
+                    <Pressable
+                      key={v.key}
+                      style={[w.card, { marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 }, memberVisibility === v.key && { borderColor: '#7c3aed', borderWidth: 2 }]}
+                      onPress={() => setMemberVisibility(v.key as any)}
+                    >
+                      <Ionicons name={v.icon as any} size={18} color={memberVisibility === v.key ? '#a78bfa' : '#475569'} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: memberVisibility === v.key ? '#e2e8f0' : '#64748b', fontWeight: '600', fontSize: 13 }}>{v.label}</Text>
+                        <Text style={{ color: '#334155', fontSize: 11 }}>{v.desc}</Text>
+                      </View>
+                      {memberVisibility === v.key && <Ionicons name="checkmark-circle" size={18} color="#7c3aed" />}
+                    </Pressable>
+                  ))}
+
+                  {memberVisibility === 'congregation' && (
+                    <Pressable
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 }}
+                      onPress={() => setMemberAnonymous(v => !v)}
+                    >
+                      <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: memberAnonymous ? '#7c3aed' : '#334155', backgroundColor: memberAnonymous ? '#7c3aed' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                        {memberAnonymous && <Ionicons name="checkmark" size={12} color="#fff" />}
+                      </View>
+                      <Text style={{ color: '#64748b', fontSize: 13 }}>Publicar como anónimo</Text>
+                    </Pressable>
+                  )}
+
+                  <View style={[w.cardRow, { marginBottom: 16, marginTop: 8 }]}>
+                    <Text style={[w.sectionLbl, { marginBottom: 0 }]}>¿URGENTE?</Text>
+                    <Switch
+                      value={memberUrgent}
+                      onValueChange={setMemberUrgent}
+                      trackColor={{ false: '#1e293b', true: '#7c3aed' }}
+                      thumbColor={memberUrgent ? '#a78bfa' : '#475569'}
+                    />
+                  </View>
+
+                  {memberErr ? <Text style={{ color: '#f87171', fontSize: 12, marginBottom: 12 }}>{memberErr}</Text> : null}
+
+                  <Pressable
+                    style={[w.victoriaBtn, { backgroundColor: '#7c3aed' }]}
+                    onPress={handleMemberSubmit}
+                    disabled={memberSubmitting}
+                  >
+                    {memberSubmitting
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar Petición</Text>}
+                  </Pressable>
+                </ScrollView>
+              ) : (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <Ionicons name="heart-outline" size={40} color="#334155" />
+                  <Text style={w.detailEmpty}>Agrega una nueva petición</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
       </View>
     );
   }
@@ -328,7 +746,9 @@ function WebCRM() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={w.pastorName}>{currentUserName || 'Pastor'}</Text>
-            <Text style={w.pastorSub}>{currentUserRole ?? 'pastor'}</Text>
+            <Text style={w.pastorSub}>
+              {currentUserRole === 'pastor' ? 'Pastor' : currentUserRole === 'intercessor' ? 'Intercesor' : 'Miembro'}
+            </Text>
           </View>
         </View>
 
@@ -338,7 +758,8 @@ function WebCRM() {
           const count =
             item.key === 'incoming'  ? stats.active       :
             item.key === 'in_battle' ? stats.battle       :
-            item.key === 'victory'   ? stats.victoriasHoy : undefined;
+            item.key === 'victory'   ? stats.victoriasHoy :
+            item.key === 'wall'      ? wallPendingCount   : undefined;
           const isActive = activeNav === item.key;
           return (
             <Pressable
@@ -394,8 +815,137 @@ function WebCRM() {
           ))}
         </View>
 
-        {/* ══ INTERCESORES PANEL ══ */}
-        {activeNav === 'intercesores' ? (
+        {/* ══ PARED DE ORACIÓN PANEL ══ */}
+        {activeNav === 'wall' ? (
+          <View style={{ flex: 1, flexDirection: 'row' }}>
+            {/* Wall list */}
+            <View style={[w.feed, { borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.06)' }]}>
+              {/* Tabs: Aprobadas / Pendientes */}
+              <View style={{ flexDirection: 'row', margin: 16, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, padding: 4 }}>
+                <Pressable
+                  style={[{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 10 }, wallTab === 'approved' && { backgroundColor: '#7c3aed' }]}
+                  onPress={() => setWallTab('approved')}
+                >
+                  <Text style={{ color: wallTab === 'approved' ? '#fff' : '#64748b', fontWeight: '600', fontSize: 14 }}>Aprobadas</Text>
+                </Pressable>
+                <Pressable
+                  style={[{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 10, flexDirection: 'row', justifyContent: 'center', gap: 6 }, wallTab === 'pending' && { backgroundColor: '#7c3aed' }]}
+                  onPress={() => setWallTab('pending')}
+                >
+                  <Text style={{ color: wallTab === 'pending' ? '#fff' : '#64748b', fontWeight: '600', fontSize: 14 }}>Pendientes</Text>
+                  {wallPendingCount > 0 && (
+                    <View style={w.navBadge}>
+                      <Text style={w.navBadgeTxt}>{wallPendingCount}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              </View>
+
+              {wallLoading ? (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator color="#7c3aed" />
+                </View>
+              ) : (
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, gap: 10 }}>
+                  {wallTab === 'approved' ? (
+                    wallRequests.filter((r: any) => r.wall_approved).length === 0 ? (
+                      <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
+                        <Ionicons name="earth-outline" size={44} color="#1e293b" />
+                        <Text style={{ color: '#334155', fontSize: 14 }}>No hay peticiones aprobadas en la pared</Text>
+                      </View>
+                    ) : wallRequests.filter((r: any) => r.wall_approved).map((r: any) => (
+                      <View key={r.id} style={w.card}>
+                        <View style={w.cardRow}>
+                          <View style={[w.badge, { backgroundColor: (CAT_COLORS[r.category] ?? '#7c3aed') + '22', borderColor: (CAT_COLORS[r.category] ?? '#7c3aed') + '55' }]}>
+                            <Text style={[w.badgeTxt, { color: CAT_COLORS[r.category] ?? '#7c3aed' }]}>
+                              {r.category ? r.category.charAt(0).toUpperCase() + r.category.slice(1) : 'Otro'}
+                            </Text>
+                          </View>
+                          <Text style={w.cardTime}>{timeAgo(r.created_at)}</Text>
+                        </View>
+                        {!r.anonymous && r.title && (
+                          <Text style={{ color: '#64748b', fontSize: 12, marginBottom: 6 }}>{r.title} {toFlag(r.country_code)}</Text>
+                        )}
+                        <Text style={w.cardExcerpt}>{r.content}</Text>
+                        <Pressable
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, alignSelf: 'flex-start' as any, backgroundColor: '#1e1b4b', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+                          onPress={() => handleWallPray(r.id)}
+                        >
+                          <Text style={{ fontSize: 14 }}>🙏</Text>
+                          <Text style={{ color: '#a78bfa', fontWeight: '600', fontSize: 13 }}>
+                            Orar{(r.pray_count ?? 0) > 0 ? ` (${r.pray_count})` : ''}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ))
+                  ) : (
+                    wallRequests.filter((r: any) => r.wall_pending && !r.wall_approved).length === 0 ? (
+                      <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
+                        <Ionicons name="checkmark-circle-outline" size={44} color="#1e293b" />
+                        <Text style={{ color: '#334155', fontSize: 14 }}>No hay peticiones pendientes</Text>
+                      </View>
+                    ) : wallRequests.filter((r: any) => r.wall_pending && !r.wall_approved).map((r: any) => (
+                      <View key={r.id} style={w.card}>
+                        <View style={w.cardRow}>
+                          <View style={[w.badge, { backgroundColor: (CAT_COLORS[r.category] ?? '#7c3aed') + '22', borderColor: (CAT_COLORS[r.category] ?? '#7c3aed') + '55' }]}>
+                            <Text style={[w.badgeTxt, { color: CAT_COLORS[r.category] ?? '#7c3aed' }]}>
+                              {r.category ? r.category.charAt(0).toUpperCase() + r.category.slice(1) : 'Otro'}
+                            </Text>
+                          </View>
+                          {r.anonymous && (
+                            <View style={[w.badge, { backgroundColor: '#33415522', borderColor: '#47556955' }]}>
+                              <Text style={[w.badgeTxt, { color: '#64748b' }]}>Anónimo</Text>
+                            </View>
+                          )}
+                          <Text style={w.cardTime}>{timeAgo(r.created_at)}</Text>
+                        </View>
+                        {!r.anonymous && r.title && (
+                          <Text style={{ color: '#64748b', fontSize: 12, marginBottom: 6 }}>{r.title} {toFlag(r.country_code)}</Text>
+                        )}
+                        <Text style={w.cardExcerpt}>{r.content}</Text>
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                          <Pressable
+                            style={{ flex: 1, backgroundColor: '#14532d22', borderWidth: 1, borderColor: '#4ade8044', borderRadius: 8, height: 36, alignItems: 'center', justifyContent: 'center' }}
+                            onPress={() => handleWallApprove(r.id)}
+                          >
+                            <Text style={{ color: '#4ade80', fontWeight: '600', fontSize: 13 }}>✓ Aprobar</Text>
+                          </Pressable>
+                          <Pressable
+                            style={{ flex: 1, backgroundColor: '#7f1d1d22', borderWidth: 1, borderColor: '#f8717144', borderRadius: 8, height: 36, alignItems: 'center', justifyContent: 'center' }}
+                            onPress={() => handleWallReject(r.id)}
+                          >
+                            <Text style={{ color: '#f87171', fontWeight: '600', fontSize: 13 }}>✕ Rechazar</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+              )}
+            </View>
+
+            {/* Wall stats */}
+            <View style={w.detail}>
+              <View style={{ padding: 24 }}>
+                <Text style={w.detailName}>Pared de Oración</Text>
+                <Text style={{ color: '#475569', fontSize: 13, marginTop: 4, marginBottom: 24 }}>
+                  Peticiones públicas de la congregación
+                </Text>
+                {[
+                  { label: 'Aprobadas',     val: wallRequests.filter((r: any) => r.wall_approved).length,                     color: '#4ade80' },
+                  { label: 'Pendientes',    val: wallRequests.filter((r: any) => r.wall_pending && !r.wall_approved).length,   color: '#fbbf24' },
+                  { label: 'Total oraciones', val: wallRequests.reduce((s: number, r: any) => s + (r.pray_count ?? 0), 0), color: '#a78bfa' },
+                ].map(stat => (
+                  <View key={stat.label} style={[w.statCard, { marginBottom: 10 }]}>
+                    <Text style={[w.statNum, { color: stat.color }]}>{stat.val}</Text>
+                    <Text style={w.statLbl}>{stat.label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+
+        ) : activeNav === 'intercesores' ? (
           <View style={{ flex: 1, flexDirection: 'row' }}>
             {/* Intercessors list */}
             <View style={[w.feed, { borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.06)' }]}>
@@ -821,6 +1371,37 @@ function WebCRM() {
                   multiline
                   textAlignVertical="top"
                 />
+
+                <Text style={w.sectionLbl}>VISIBILIDAD</Text>
+                {([
+                  { key: 'private',      label: '🔒 Privada',      desc: 'Solo pastores/intercesores' },
+                  { key: 'circle',       label: '👥 Mi círculo',   desc: 'Visible al equipo asignado' },
+                  { key: 'congregation', label: '🌍 Congregación', desc: 'Enviar a la Pared de Oración' },
+                ] as const).map(vis => (
+                  <Pressable
+                    key={vis.key}
+                    style={[w.card, { marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 }, newVisibility === vis.key && { borderColor: '#7c3aed', borderWidth: 2 }]}
+                    onPress={() => setNewVisibility(vis.key)}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: newVisibility === vis.key ? '#e2e8f0' : '#64748b', fontWeight: '600', fontSize: 13 }}>{vis.label}</Text>
+                      <Text style={{ color: '#334155', fontSize: 11 }}>{vis.desc}</Text>
+                    </View>
+                    {newVisibility === vis.key && <Ionicons name="checkmark-circle" size={18} color="#7c3aed" />}
+                  </Pressable>
+                ))}
+
+                {newVisibility === 'congregation' && (
+                  <Pressable
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}
+                    onPress={() => setNewAnonymous(v => !v)}
+                  >
+                    <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: newAnonymous ? '#7c3aed' : '#334155', backgroundColor: newAnonymous ? '#7c3aed' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                      {newAnonymous && <Ionicons name="checkmark" size={12} color="#fff" />}
+                    </View>
+                    <Text style={{ color: '#64748b', fontSize: 13 }}>Publicar como anónimo</Text>
+                  </Pressable>
+                )}
 
                 {submitErr ? <Text style={{ color: '#f87171', fontSize: 12, marginBottom: 12 }}>{submitErr}</Text> : null}
 

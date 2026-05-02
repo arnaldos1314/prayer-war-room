@@ -20,6 +20,12 @@ export type PrayerRequest = {
   updated_at: string;
   /** Joined from public.profiles via assigned_to FK */
   assigned_profile?: { full_name: string; avatar_url: string | null } | null;
+  // Prayer Wall fields
+  visibility: 'private' | 'circle' | 'congregation' | null;
+  anonymous: boolean;
+  wall_pending: boolean;
+  wall_approved: boolean;
+  pray_count: number;
 };
 
 export type InsertPayload = {
@@ -31,6 +37,11 @@ export type InsertPayload = {
   country_code?: string | null;
   urgent: boolean;
   status: string;
+  visibility?: string;
+  anonymous?: boolean;
+  wall_pending?: boolean;
+  wall_approved?: boolean;
+  pray_count?: number;
 };
 
 // ── Hook ─────────────────────────────────────────────────────
