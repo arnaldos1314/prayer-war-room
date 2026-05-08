@@ -57,7 +57,8 @@ export function usePrayerRequests(statusFilter?: string, todayOnly = false) {
       .select('*, assigned_profile:assigned_to(full_name, avatar_url)')
       .eq('space_type', 'ministry')
       .order('urgent',     { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     if (statusFilter) {
       query = query.eq('status', statusFilter);

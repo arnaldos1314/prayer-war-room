@@ -375,8 +375,8 @@ function WebCRM() {
       setProfilesLoading(true);
       supabase
         .from('profiles')
-        .select('id, full_name, role, email')
-        .order('full_name')
+        .select('id, full_name, role, church, country, updated_at')
+        .order('role', { ascending: true })
         .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
     }
   }, [activeNav]);
@@ -690,13 +690,13 @@ function WebCRM() {
     setAiLoading(false);
   };
 
-  // Stats computed from live data
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  // Stats computed from all requests regardless of modoHoy filter
+  const allReqs = requests;
   const stats = {
-    active:       requests.filter(r => r.status !== 'victory').length,
-    unassigned:   requests.filter(r => r.status !== 'victory' && !r.assigned_to && !localAssign[r.id]).length,
-    battle:       requests.filter(r => r.status === 'in_battle').length,
-    victoriasHoy: requests.filter(r => r.status === 'victory' && new Date(r.created_at) >= todayStart).length,
+    active:       allReqs.filter(r => r.status !== 'victory').length,
+    unassigned:   allReqs.filter(r => !r.assigned_to && r.status === 'incoming').length,
+    battle:       allReqs.filter(r => r.status === 'in_battle').length,
+    victoriasHoy: allReqs.filter(r => r.status === 'victory').length,
   };
 
   // Filtered feed — status already filtered by hook, apply chip + search here
@@ -1582,22 +1582,25 @@ function WebCRM() {
           </View>
 
         ) : activeNav === 'ajustes' ? (
-          /* ══ AJUSTES — GESTIÓN DE ROLES ══ */
+          /* ══ AJUSTES — GESTIÓN DE USUARIOS ══ */
           <View style={{ flex: 1, flexDirection: 'row' }}>
-            {/* Profile list */}
             <View style={[w.feed, { borderRightWidth: 0 }]}>
               <View style={w.feedTopBar}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600' }}>Gestión de Roles</Text>
-                  <Text style={{ color: '#475569', fontSize: 12, marginTop: 2 }}>
-                    Solo pastores pueden cambiar roles
-                  </Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600' }}>Gestión de usuarios</Text>
+                  {allProfiles.length > 0 && (
+                    <View style={[w.badge, { backgroundColor: 'rgba(124,58,237,0.2)', borderColor: 'rgba(124,58,237,0.4)' }]}>
+                      <Text style={[w.badgeTxt, { color: '#a78bfa' }]}>{allProfiles.length}</Text>
+                    </View>
+                  )}
                 </View>
                 <Pressable
                   style={{ padding: 8 }}
                   onPress={() => {
                     setProfilesLoading(true);
-                    supabase.from('profiles').select('id, full_name, role, email').order('full_name')
+                    supabase.from('profiles')
+                      .select('id, full_name, role, church, country, updated_at')
+                      .order('role', { ascending: true })
                       .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
                   }}
                 >
@@ -1610,7 +1613,7 @@ function WebCRM() {
                   <ActivityIndicator color="#7c3aed" />
                 </View>
               ) : (
-                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 8 }}>
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 6 }}>
                   {allProfiles.length === 0 && (
                     <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
                       <Ionicons name="people-outline" size={44} color="#1e293b" />
@@ -1618,62 +1621,55 @@ function WebCRM() {
                     </View>
                   )}
                   {allProfiles.map((p: any) => {
-                    const ROLES = ['member', 'intercessor', 'pastor'] as const;
-                    const roleBadgeColors: Record<string, string> = {
-                      pastor:      '#7c3aed',
-                      intercessor: '#2563eb',
-                      member:      '#475569',
+                    const ROLE_OPTIONS = ['member', 'intercessor', 'pastor'] as const;
+                    type RoleKey = typeof ROLE_OPTIONS[number];
+                    const roleMeta: Record<RoleKey, { label: string; color: string; bg: string }> = {
+                      pastor:      { label: 'Pastor',    color: '#a78bfa', bg: 'rgba(124,58,237,0.2)'  },
+                      intercessor: { label: 'Intercesor',color: '#2dd4bf', bg: 'rgba(20,184,166,0.2)'  },
+                      member:      { label: 'Miembro',   color: '#94a3b8', bg: 'rgba(100,116,139,0.2)' },
                     };
-                    const badgeColor = roleBadgeColors[p.role] ?? '#475569';
+                    const meta = roleMeta[(p.role as RoleKey) ?? 'member'] ?? roleMeta.member;
                     const isUpdating = roleUpdating === p.id;
                     return (
                       <View
                         key={p.id}
-                        style={[w.card, { flexDirection: 'row', alignItems: 'center', gap: 14 }]}
+                        style={{ backgroundColor: '#0f0f1a', borderRadius: 8, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 12 }}
                       >
                         {/* Avatar */}
-                        <View style={[w.assignedAvatarBig, { width: 40, height: 40, borderRadius: 20 }]}>
-                          <Text style={[w.assignedAvatarTxt, { fontSize: 14 }]}>
+                        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1e1b4b', alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ color: '#a78bfa', fontWeight: '700', fontSize: 13 }}>
                             {getInitials(p.full_name ?? '?')}
                           </Text>
                         </View>
 
-                        {/* Name + email */}
+                        {/* Name + church */}
                         <View style={{ flex: 1 }}>
-                          <Text style={{ color: '#e2e8f0', fontWeight: '600', fontSize: 14 }}>
+                          <Text style={{ color: '#fff', fontWeight: '500', fontSize: 14 }}>
                             {p.full_name ?? 'Sin nombre'}
                           </Text>
-                          <Text style={{ color: '#475569', fontSize: 11, marginTop: 1 }}>
-                            {p.email ?? ''}
-                          </Text>
+                          {p.church ? (
+                            <Text style={{ color: '#64748b', fontSize: 12, marginTop: 1 }}>{p.church}</Text>
+                          ) : null}
                         </View>
 
                         {/* Current role badge */}
-                        <View style={[w.badge, { backgroundColor: badgeColor + '22', borderColor: badgeColor + '55' }]}>
-                          <Text style={[w.badgeTxt, { color: badgeColor }]}>{p.role ?? 'member'}</Text>
+                        <View style={[w.badge, { backgroundColor: meta.bg, borderColor: meta.color + '55' }]}>
+                          <Text style={[w.badgeTxt, { color: meta.color }]}>{meta.label}</Text>
                         </View>
 
-                        {/* Role selector pills */}
+                        {/* Role change buttons — only show OTHER roles */}
                         {isUpdating ? (
                           <ActivityIndicator color="#7c3aed" size="small" />
                         ) : (
                           <View style={{ flexDirection: 'row', gap: 4 }}>
-                            {ROLES.map(r => (
+                            {ROLE_OPTIONS.filter(r => r !== p.role).map(r => (
                               <Pressable
                                 key={r}
-                                style={[
-                                  w.catPill,
-                                  p.role === r && w.catPillActive,
-                                  { paddingHorizontal: 8, paddingVertical: 4 },
-                                ]}
-                                onPress={() => p.role !== r && handleRoleChange(p.id, r)}
+                                style={[w.catPill, { paddingHorizontal: 8, paddingVertical: 4 }]}
+                                onPress={() => handleRoleChange(p.id, r)}
                               >
-                                <Text style={[
-                                  w.catPillTxt,
-                                  p.role === r && { color: '#fff' },
-                                  { fontSize: 11 },
-                                ]}>
-                                  {r === 'member' ? 'Miembro' : r === 'intercessor' ? 'Intercesor' : 'Pastor'}
+                                <Text style={[w.catPillTxt, { fontSize: 11 }]}>
+                                  {roleMeta[r].label}
                                 </Text>
                               </Pressable>
                             ))}
