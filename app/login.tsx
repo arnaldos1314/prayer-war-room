@@ -105,6 +105,7 @@ export default function LoginScreen() {
           role: 'member',
         });
         await AsyncStorage.setItem('@war_room_cached_name', nombre.trim());
+        await AsyncStorage.setItem('@war_room_profile_complete', 'true');
         router.replace('/(tabs)');
       } else {
         setMsgOk(true);

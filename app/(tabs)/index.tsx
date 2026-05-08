@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { User } from '@supabase/supabase-js';
 import * as Speech from 'expo-speech';
@@ -259,6 +260,7 @@ function WebCRM() {
   const [interErr,        setInterErr]        = useState('');
 
   // Profile completion (PART 2)
+  const [profileChecked,   setProfileChecked]   = useState(false);
   const [profileComplete,  setProfileComplete]  = useState(true);
   const [profileNombre,    setProfileNombre]    = useState('');
   const [profileIglesia,   setProfileIglesia]   = useState('');
@@ -327,8 +329,16 @@ function WebCRM() {
 
   // Fetch current user's profile role on mount
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) { setRoleLoading(false); return; }
+    (async () => {
+      // Check AsyncStorage cache first to avoid flashing the profile form
+      const cached = await AsyncStorage.getItem('@war_room_profile_complete');
+      if (cached === 'true') {
+        setProfileComplete(true);
+        setProfileChecked(true);
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setRoleLoading(false); setProfileChecked(true); return; }
       setCurrentUserId(user.id);
       const { data } = await supabase
         .from('profiles')
@@ -338,9 +348,15 @@ function WebCRM() {
       setCurrentUserRole(data?.role ?? 'member');
       const name = data?.full_name ?? user.email?.split('@')[0] ?? '';
       setCurrentUserName(name);
-      if (!data?.full_name) setProfileComplete(false);
+      if (!data?.full_name) {
+        setProfileComplete(false);
+      } else {
+        setProfileComplete(true);
+        await AsyncStorage.setItem('@war_room_profile_complete', 'true');
+      }
+      setProfileChecked(true);
       setRoleLoading(false);
-    });
+    })();
   }, []);
 
   // Initial wall pending count (for sidebar badge)
@@ -478,6 +494,7 @@ function WebCRM() {
       });
       setCurrentUserName(profileNombre.trim());
       setProfileComplete(true);
+      await AsyncStorage.setItem('@war_room_profile_complete', 'true');
     } catch (err: any) {
       setProfileErr(err.message ?? 'Error al guardar');
     } finally {
@@ -749,7 +766,7 @@ function WebCRM() {
   }
 
   // PART 2 — Profile completion screen (shown when full_name is missing)
-  if (!profileComplete) {
+  if (profileChecked && !profileComplete) {
     return (
       <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }]}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingVertical: 40, alignItems: 'center', maxWidth: 400, width: '100%', alignSelf: 'center' as any }}>
