@@ -327,25 +327,28 @@ function WebCRM() {
   const searchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch current user's profile role on mount
-  // Source of truth: Supabase only — no AsyncStorage dependency (unreliable on web)
   useEffect(() => {
-    (async () => {
+    const loadProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setRoleLoading(false); setProfileChecked(true); return; }
       setCurrentUserId(user.id);
       const { data } = await supabase
         .from('profiles')
-        .select('full_name, role')
+        .select('id, full_name, role, church, country')
         .eq('id', user.id)
         .single();
-      setCurrentUserRole(data?.role ?? 'member');
-      const name = data?.full_name ?? '';
-      setCurrentUserName(name);
-      // Only show profile form if full_name is genuinely missing in DB
-      setProfileComplete(!!data?.full_name);
+      if (data) {
+        setCurrentUserRole(data.role ?? 'member');
+        setCurrentUserName(data.full_name ?? '');
+        setProfileComplete(!!data.full_name && data.full_name.trim().length > 0);
+      } else {
+        setCurrentUserRole('member');
+        setProfileComplete(false);
+      }
       setProfileChecked(true);
       setRoleLoading(false);
-    })();
+    };
+    loadProfile();
   }, []);
 
   // Initial wall pending count (for sidebar badge)
@@ -545,6 +548,7 @@ function WebCRM() {
         user_id:      currentUserId,
         space_type:   spaceMap[memberCircle] ?? 'personal',
         category:     memberCat,
+        title:        memberAnonymous ? null : (currentUserName.trim() || null),
         content:      memberContent.trim(),
         urgent:       memberUrgent,
         status:       'incoming',

@@ -78,20 +78,11 @@ export function usePrayerRequests(statusFilter?: string, todayOnly = false) {
     setLoading(false);
   }, [statusFilter, todayOnly]);
 
-  // Initial fetch + realtime subscription
+  // Initial fetch + 30s polling (realtime disabled — websocket unreliable on web)
   useEffect(() => {
     fetchRequests();
-
-    const channel = supabase
-      .channel('prayer_requests_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'prayer_requests' },
-        () => fetchRequests()
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const interval = setInterval(fetchRequests, 30000);
+    return () => clearInterval(interval);
   }, [fetchRequests]);
 
   // ── Mutations ──────────────────────────────────────────────
