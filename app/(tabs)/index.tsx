@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { User } from '@supabase/supabase-js';
 import * as Speech from 'expo-speech';
@@ -328,15 +327,9 @@ function WebCRM() {
   const searchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch current user's profile role on mount
+  // Source of truth: Supabase only — no AsyncStorage dependency (unreliable on web)
   useEffect(() => {
     (async () => {
-      // Check AsyncStorage cache first to avoid flashing the profile form
-      const cached = await AsyncStorage.getItem('@war_room_profile_complete');
-      if (cached === 'true') {
-        setProfileComplete(true);
-        setProfileChecked(true);
-      }
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setRoleLoading(false); setProfileChecked(true); return; }
       setCurrentUserId(user.id);
@@ -346,14 +339,10 @@ function WebCRM() {
         .eq('id', user.id)
         .single();
       setCurrentUserRole(data?.role ?? 'member');
-      const name = data?.full_name ?? user.email?.split('@')[0] ?? '';
+      const name = data?.full_name ?? '';
       setCurrentUserName(name);
-      if (!data?.full_name) {
-        setProfileComplete(false);
-      } else {
-        setProfileComplete(true);
-        await AsyncStorage.setItem('@war_room_profile_complete', 'true');
-      }
+      // Only show profile form if full_name is genuinely missing in DB
+      setProfileComplete(!!data?.full_name);
       setProfileChecked(true);
       setRoleLoading(false);
     })();
@@ -375,8 +364,9 @@ function WebCRM() {
       setProfilesLoading(true);
       supabase
         .from('profiles')
-        .select('id, full_name, role, church, country, updated_at')
+        .select('id, full_name, role, church, country')
         .order('role', { ascending: true })
+        .limit(500)
         .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
     }
   }, [activeNav]);
@@ -494,7 +484,6 @@ function WebCRM() {
       });
       setCurrentUserName(profileNombre.trim());
       setProfileComplete(true);
-      await AsyncStorage.setItem('@war_room_profile_complete', 'true');
     } catch (err: any) {
       setProfileErr(err.message ?? 'Error al guardar');
     } finally {
@@ -607,7 +596,7 @@ function WebCRM() {
     if (!currentUserId) return;
     const { data } = await supabase
       .from('circles')
-      .select('*, member:member_id(id, full_name), owner:owner_id(id, full_name)')
+      .select('*')
       .or(`owner_id.eq.${currentUserId},member_id.eq.${currentUserId}`)
       .eq('status', 'accepted');
     setCircles(data ?? []);
@@ -617,7 +606,7 @@ function WebCRM() {
     if (!currentUserId) return;
     const { data } = await supabase
       .from('circles')
-      .select('*, owner:owner_id(id, full_name)')
+      .select('*')
       .eq('member_id', currentUserId)
       .eq('status', 'pending');
     const inv = data ?? [];
@@ -881,7 +870,7 @@ function WebCRM() {
               {pendingInvitations.slice(0, 3).map((inv: any) => (
                 <View key={inv.id} style={{ marginTop: 8 }}>
                   <Text style={{ color: '#cbd5e1', fontSize: 11, marginBottom: 4 }}>
-                    {inv.owner?.full_name ?? 'Alguien'} te invitó a su círculo
+                    Alguien te invitó a su círculo
                   </Text>
                   <View style={{ flexDirection: 'row', gap: 6 }}>
                     <Pressable
@@ -906,13 +895,14 @@ function WebCRM() {
             <Text style={{ color: '#1e293b', fontSize: 12, marginBottom: 8, marginLeft: 4 }}>Sin conexiones aún</Text>
           ) : (
             circles.slice(0, 4).map((c: any) => {
-              const other = c.owner_id === currentUserId ? c.member : c.owner;
+              const otherId = c.owner_id === currentUserId ? c.member_id : c.owner_id;
+              const shortId = (otherId ?? '??').slice(0, 2).toUpperCase();
               return (
                 <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <View style={[w.assignedAvatarBig, { width: 28, height: 28, borderRadius: 14 }]}>
-                    <Text style={[w.assignedAvatarTxt, { fontSize: 10 }]}>{getInitials(other?.full_name ?? '?')}</Text>
+                    <Text style={[w.assignedAvatarTxt, { fontSize: 10 }]}>{shortId}</Text>
                   </View>
-                  <Text style={{ color: '#64748b', fontSize: 12, flex: 1 }} numberOfLines={1}>{other?.full_name ?? 'Miembro'}</Text>
+                  <Text style={{ color: '#64748b', fontSize: 12, flex: 1 }} numberOfLines={1}>Miembro del círculo</Text>
                 </View>
               );
             })
@@ -1061,14 +1051,15 @@ function WebCRM() {
                     <>
                       <Text style={[w.sectionLbl, { marginTop: 20 }]}>EQUIPO ACTUAL</Text>
                       {circles.map((c: any) => {
-                        const other = c.owner_id === currentUserId ? c.member : c.owner;
+                        const otherId = c.owner_id === currentUserId ? c.member_id : c.owner_id;
+                        const shortId = (otherId ?? '??').slice(0, 2).toUpperCase();
                         return (
                           <View key={c.id} style={[w.card, { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginBottom: 8 }]}>
                             <View style={[w.assignedAvatarBig, { width: 36, height: 36, borderRadius: 18 }]}>
-                              <Text style={[w.assignedAvatarTxt, { fontSize: 12 }]}>{getInitials(other?.full_name ?? '?')}</Text>
+                              <Text style={[w.assignedAvatarTxt, { fontSize: 12 }]}>{shortId}</Text>
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={{ color: '#e2e8f0', fontSize: 13, fontWeight: '600' }}>{other?.full_name ?? 'Miembro'}</Text>
+                              <Text style={{ color: '#e2e8f0', fontSize: 13, fontWeight: '600' }}>Miembro del círculo</Text>
                               <Text style={{ color: '#475569', fontSize: 11 }}>
                                 {c.circle_type === 'family' ? 'Familia' : c.circle_type === 'friends' ? 'Amigos' : 'Ministerio'}
                               </Text>
@@ -1599,8 +1590,9 @@ function WebCRM() {
                   onPress={() => {
                     setProfilesLoading(true);
                     supabase.from('profiles')
-                      .select('id, full_name, role, church, country, updated_at')
+                      .select('id, full_name, role, church, country')
                       .order('role', { ascending: true })
+                      .limit(500)
                       .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
                   }}
                 >
