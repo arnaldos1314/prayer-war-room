@@ -205,6 +205,60 @@ async function getFlockInsight(context: string): Promise<FlockInsight> {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  COUNTRY LIST
+// ─────────────────────────────────────────────────────────────
+const COUNTRIES = [
+  { code: 'US', name: 'Estados Unidos' }, { code: 'MX', name: 'México' },
+  { code: 'CO', name: 'Colombia' },       { code: 'AR', name: 'Argentina' },
+  { code: 'PE', name: 'Perú' },           { code: 'CL', name: 'Chile' },
+  { code: 'VE', name: 'Venezuela' },      { code: 'EC', name: 'Ecuador' },
+  { code: 'GT', name: 'Guatemala' },      { code: 'CU', name: 'Cuba' },
+  { code: 'DO', name: 'República Dominicana' }, { code: 'HN', name: 'Honduras' },
+  { code: 'SV', name: 'El Salvador' },    { code: 'NI', name: 'Nicaragua' },
+  { code: 'CR', name: 'Costa Rica' },     { code: 'PA', name: 'Panamá' },
+  { code: 'BO', name: 'Bolivia' },        { code: 'PY', name: 'Paraguay' },
+  { code: 'UY', name: 'Uruguay' },        { code: 'PR', name: 'Puerto Rico' },
+  { code: 'ES', name: 'España' },         { code: 'BR', name: 'Brasil' },
+  { code: 'OTHER', name: 'Otro' },
+] as const;
+
+// Web-only HTML select for country — falls back to TextInput on native
+const CountrySelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => {
+  if (Platform.OS === 'web') {
+    return (
+      <select
+        value={value}
+        onChange={(e: any) => onChange(e.target.value)}
+        style={{
+          width: '100%', padding: '12px 14px', borderRadius: 12,
+          background: 'rgba(255,255,255,0.05)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          color: '#e2e8f0', fontSize: 14, marginBottom: 12,
+          appearance: 'none', WebkitAppearance: 'none',
+          cursor: 'pointer',
+        } as any}
+      >
+        <option value="" style={{ background: '#0f0f1a' }}>Selecciona tu país</option>
+        {COUNTRIES.map(c => (
+          <option key={c.code} value={c.code} style={{ background: '#0f0f1a' }}>{c.name}</option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <TextInput
+      style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#e2e8f0', fontSize: 14, marginBottom: 12 }}
+      placeholder="Código de país (CO, MX…)"
+      placeholderTextColor="#475569"
+      value={value}
+      onChangeText={v => onChange(v.toUpperCase().slice(0, 2))}
+      maxLength={2}
+      autoCapitalize="characters"
+    />
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
 //  WEB CRM LAYOUT  (real Supabase data)
 // ─────────────────────────────────────────────────────────────
 function WebCRM() {
@@ -368,9 +422,12 @@ function WebCRM() {
       supabase
         .from('profiles')
         .select('id, full_name, role, church, country')
-        .order('role', { ascending: true })
+        .order('created_at', { ascending: true })
         .limit(500)
-        .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
+        .then(({ data, error }) => {
+          if (!error) setAllProfiles(data ?? []);
+          setProfilesLoading(false);
+        });
     }
   }, [activeNav]);
 
@@ -487,6 +544,7 @@ function WebCRM() {
       });
       setCurrentUserName(profileNombre.trim());
       setProfileComplete(true);
+      setProfileChecked(true);
     } catch (err: any) {
       setProfileErr(err.message ?? 'Error al guardar');
     } finally {
@@ -789,15 +847,7 @@ function WebCRM() {
           />
 
           <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>PAÍS (opcional)</Text>
-          <TextInput
-            style={[w.formInput as any, { marginBottom: 24, width: '100%' as any }]}
-            placeholder="CO, MX, US…"
-            placeholderTextColor="#475569"
-            value={profilePaisSetup}
-            onChangeText={t => setProfilePaisSetup(t.toUpperCase().slice(0, 2))}
-            maxLength={2}
-            autoCapitalize="characters"
-          />
+          <CountrySelect value={profilePaisSetup} onChange={setProfilePaisSetup} />
 
           {profileErr ? <Text style={{ color: '#f87171', fontSize: 12, marginBottom: 12 }}>{profileErr}</Text> : null}
 
@@ -1595,9 +1645,12 @@ function WebCRM() {
                     setProfilesLoading(true);
                     supabase.from('profiles')
                       .select('id, full_name, role, church, country')
-                      .order('role', { ascending: true })
+                      .order('created_at', { ascending: true })
                       .limit(500)
-                      .then(({ data }) => { setAllProfiles(data ?? []); setProfilesLoading(false); });
+                      .then(({ data, error }) => {
+                        if (!error) setAllProfiles(data ?? []);
+                        setProfilesLoading(false);
+                      });
                   }}
                 >
                   <Ionicons name="refresh-outline" size={18} color="#475569" />
@@ -2119,16 +2172,8 @@ function WebCRM() {
                   onChangeText={setNewName}
                 />
 
-                <Text style={w.sectionLbl}>PAÍS (código ISO)</Text>
-                <TextInput
-                  style={[w.formInput as any, { marginBottom: 16 }]}
-                  placeholder="CO, MX, PE…"
-                  placeholderTextColor="#475569"
-                  value={newCountry}
-                  onChangeText={t => setNewCountry(t.toUpperCase().slice(0, 2))}
-                  maxLength={2}
-                  autoCapitalize="characters"
-                />
+                <Text style={w.sectionLbl}>PAÍS</Text>
+                <CountrySelect value={newCountry} onChange={setNewCountry} />
 
                 <Text style={w.sectionLbl}>CATEGORÍA</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
