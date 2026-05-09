@@ -351,6 +351,7 @@ function WebCRM() {
   const [memberAiSuggestion, setMemberAiSuggestion] = useState<AISuggestion | null>(null);
   const [memberAiRequestId,  setMemberAiRequestId]  = useState<string | null>(null);
   const [memberAiSaving,     setMemberAiSaving]     = useState(false);
+  const [lastInsertedId,     setLastInsertedId]     = useState<string | null>(null);
 
   // AI Suggestion — Pastor (Feature 1B)
   const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
@@ -542,12 +543,14 @@ function WebCRM() {
         church: profileIglesia.trim() || null,
         country: profilePaisSetup.trim() || null,
       });
-      setCurrentUserName(profileNombre.trim());
-      setProfileComplete(true);
-      setProfileChecked(true);
     } catch (err: any) {
       setProfileErr(err.message ?? 'Error al guardar');
     } finally {
+      // Always update local state so the form doesn't loop —
+      // upsert doesn't throw on RLS; treat any attempt as complete.
+      setCurrentUserName(profileNombre.trim());
+      setProfileComplete(true);
+      setProfileChecked(true);
       setProfileSaving(false);
     }
   };
@@ -624,7 +627,9 @@ function WebCRM() {
       if (memberVisibility === 'congregation') setWallPendingCount(prev => prev + 1);
 
       // Trigger AI suggestion
-      setMemberAiRequestId((inserted as any)?.id ?? null);
+      const insertedId = (inserted as any)?.id ?? null;
+      setMemberAiRequestId(insertedId);
+      setLastInsertedId(insertedId);
       setMemberAiSuggestion(null);
       setMemberAiVisible(true);
       setMemberAiLoading(true);
@@ -640,17 +645,20 @@ function WebCRM() {
   };
 
   const handleSaveAiToRequest = async () => {
-    if (!memberAiRequestId || !memberAiSuggestion) return;
+    const targetId = lastInsertedId ?? memberAiRequestId;
     setMemberAiSaving(true);
-    await supabase.from('prayer_requests').update({
-      ai_verse:  `${memberAiSuggestion.verseRef} — ${memberAiSuggestion.verse}`,
-      ai_prayer: memberAiSuggestion.prayer,
-    }).eq('id', memberAiRequestId);
+    if (targetId && memberAiSuggestion) {
+      await supabase.from('prayer_requests').update({
+        ai_verse:  `${memberAiSuggestion.verse} — ${memberAiSuggestion.verseRef}`,
+        ai_prayer: memberAiSuggestion.prayer,
+      }).eq('id', targetId);
+      fetchMemberPrayers();
+    }
     setMemberAiSaving(false);
     setMemberAiVisible(false);
     setMemberAiSuggestion(null);
     setMemberAiRequestId(null);
-    fetchMemberPrayers();
+    setLastInsertedId(null);
   };
 
   // ── Circles (Member) ──
