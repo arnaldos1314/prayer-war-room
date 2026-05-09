@@ -2035,7 +2035,7 @@ function WebCRM() {
                   const isHov = hoveredId === item.id;
                   const isSel = selected?.id === item.id;
                   const catColor = CAT_COLORS[item.category ?? ''] ?? '#7c3aed';
-                  const assignName = item.assigned_profile?.full_name ?? localAssign[item.id] ?? null;
+                  const assignName = localAssign[item.id] ?? item.assigned_to ?? null;
                   return (
                     <Pressable
                       key={item.id}
@@ -2255,15 +2255,15 @@ function WebCRM() {
                 </View>
 
                 <Text style={w.sectionLbl}>INTERCESOR ASIGNADO</Text>
-                {(selected.assigned_profile?.full_name ?? localAssign[selected.id]) ? (
+                {(localAssign[selected.id] ?? selected.assigned_to) ? (
                   <View style={w.assignedBig}>
                     <View style={w.assignedAvatarBig}>
                       <Text style={w.assignedAvatarTxt}>
-                        {getInitials(selected.assigned_profile?.full_name ?? localAssign[selected.id]!)}
+                        {getInitials(localAssign[selected.id] ?? selected.assigned_to ?? '')}
                       </Text>
                     </View>
                     <Text style={{ color: '#e2e8f0', fontSize: 15, flex: 1 }}>
-                      {selected.assigned_profile?.full_name ?? localAssign[selected.id]}
+                      {localAssign[selected.id] ?? selected.assigned_to ?? 'Sin asignar'}
                     </Text>
                     <Pressable style={w.contactBtn} onPress={() => Linking.openURL('https://wa.me/')}>
                       <Text style={{ color: '#a78bfa', fontSize: 13, fontWeight: '600' }}>Contactar</Text>

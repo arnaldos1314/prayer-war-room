@@ -18,8 +18,6 @@ export type PrayerRequest = {
   victory_date: string | null;
   created_at: string;
   updated_at: string;
-  /** Joined from public.profiles via assigned_to FK */
-  assigned_profile?: { full_name: string; avatar_url: string | null } | null;
   // Prayer Wall fields
   visibility: 'private' | 'circle' | 'congregation' | null;
   anonymous: boolean;
@@ -54,7 +52,7 @@ export function usePrayerRequests(statusFilter?: string, todayOnly = false) {
     setLoading(true);
     let query = supabase
       .from('prayer_requests')
-      .select('*, assigned_profile:assigned_to(full_name, avatar_url)')
+      .select('*')
       .eq('space_type', 'ministry')
       .order('urgent',     { ascending: false })
       .order('created_at', { ascending: false })
