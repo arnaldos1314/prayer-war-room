@@ -381,6 +381,7 @@ function WebCRM() {
   const searchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch current user's profile — single source of truth
+  // Auto-creates a profile from email if none exists so the gate never shows on login
   useEffect(() => {
     const loadProfile = async () => {
       try {
@@ -392,9 +393,21 @@ function WebCRM() {
           .select('id, full_name, role, church, country')
           .eq('id', user.id)
           .single();
-        setProfile(data ?? null);
-        setCurrentUserRole(data?.role ?? 'member');
-        setCurrentUserName(data?.full_name ?? '');
+        if (!data || !data.full_name) {
+          const emailName = user.email?.split('@')[0] || 'Usuario';
+          await supabase.from('profiles').upsert(
+            { id: user.id, full_name: emailName, role: 'member' },
+            { onConflict: 'id' }
+          );
+          const syntheticProfile = { id: user.id, full_name: emailName, role: 'member', church: null, country: null };
+          setProfile(syntheticProfile);
+          setCurrentUserRole('member');
+          setCurrentUserName(emailName);
+        } else {
+          setProfile(data);
+          setCurrentUserRole(data.role ?? 'member');
+          setCurrentUserName(data.full_name ?? '');
+        }
       } finally {
         setProfileLoading(false);
       }
