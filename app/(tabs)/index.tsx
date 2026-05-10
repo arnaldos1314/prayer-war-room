@@ -293,7 +293,8 @@ function WebCRM() {
   // Current user identity
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState('');
-  const [roleLoading,     setRoleLoading]     = useState(true);
+  const [profile,         setProfile]         = useState<{ id?: string; full_name?: string | null; role?: string; church?: string | null; country?: string | null } | null>(null);
+  const [profileLoading,  setProfileLoading]  = useState(true);
 
   // Ajustes — role management
   const [allProfiles,     setAllProfiles]     = useState<any[]>([]);
@@ -313,8 +314,6 @@ function WebCRM() {
   const [interErr,        setInterErr]        = useState('');
 
   // Profile completion (PART 2)
-  const [profileChecked,   setProfileChecked]   = useState(false);
-  const [profileComplete,  setProfileComplete]  = useState(true);
   const [profileNombre,    setProfileNombre]    = useState('');
   const [profileIglesia,   setProfileIglesia]   = useState('');
   const [profilePaisSetup, setProfilePaisSetup] = useState('');
@@ -381,27 +380,24 @@ function WebCRM() {
   const [selectedCircleType,   setSelectedCircleType]   = useState<'family' | 'friends' | 'ministry'>('friends');
   const searchDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch current user's profile role on mount
+  // Fetch current user's profile — single source of truth
   useEffect(() => {
     const loadProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setRoleLoading(false); setProfileChecked(true); return; }
-      setCurrentUserId(user.id);
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name, role, church, country')
-        .eq('id', user.id)
-        .single();
-      if (data) {
-        setCurrentUserRole(data.role ?? 'member');
-        setCurrentUserName(data.full_name ?? '');
-        setProfileComplete(!!data.full_name && data.full_name.trim().length > 0);
-      } else {
-        setCurrentUserRole('member');
-        setProfileComplete(false);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        setCurrentUserId(user.id);
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, full_name, role, church, country')
+          .eq('id', user.id)
+          .single();
+        setProfile(data ?? null);
+        setCurrentUserRole(data?.role ?? 'member');
+        setCurrentUserName(data?.full_name ?? '');
+      } finally {
+        setProfileLoading(false);
       }
-      setProfileChecked(true);
-      setRoleLoading(false);
     };
     loadProfile();
   }, []);
@@ -546,11 +542,10 @@ function WebCRM() {
     } catch (err: any) {
       setProfileErr(err.message ?? 'Error al guardar');
     } finally {
-      // Always update local state so the form doesn't loop —
-      // upsert doesn't throw on RLS; treat any attempt as complete.
-      setCurrentUserName(profileNombre.trim());
-      setProfileComplete(true);
-      setProfileChecked(true);
+      // Always update profile state — gate resolves automatically when full_name is set
+      const name = profileNombre.trim();
+      setCurrentUserName(name);
+      setProfile(prev => ({ ...prev, full_name: name }));
       setProfileSaving(false);
     }
   };
@@ -815,8 +810,8 @@ function WebCRM() {
   const selectedCatColor = selected ? (CAT_COLORS[selected.category ?? ''] ?? '#7c3aed') : '#7c3aed';
   const statusStep = selected ? getStatusStep(selected) : 0;
 
-  // ── Role gate ──
-  if (roleLoading) {
+  // ── Loading gate — wait for profile fetch before rendering anything ──
+  if (profileLoading) {
     return (
       <View style={[w.root, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator color="#7c3aed" size="large" />
@@ -825,7 +820,7 @@ function WebCRM() {
   }
 
   // PART 2 — Profile completion screen (shown when full_name is missing)
-  if (profileChecked && !profileComplete) {
+  if (!profile?.full_name || profile.full_name.trim().length === 0) {
     return (
       <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }]}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingVertical: 40, alignItems: 'center', maxWidth: 400, width: '100%', alignSelf: 'center' as any }}>
