@@ -396,16 +396,16 @@ function WebCRM() {
         if (!data || !data.full_name) {
           const emailName = user.email?.split('@')[0] || 'Usuario';
           await supabase.from('profiles').upsert(
-            { id: user.id, full_name: emailName, role: 'member' },
+            { id: user.id, full_name: emailName, role: 'user' },
             { onConflict: 'id' }
           );
-          const syntheticProfile = { id: user.id, full_name: emailName, role: 'member', church: null, country: null };
+          const syntheticProfile = { id: user.id, full_name: emailName, role: 'user', church: null, country: null };
           setProfile(syntheticProfile);
-          setCurrentUserRole('member');
+          setCurrentUserRole('user');
           setCurrentUserName(emailName);
         } else {
           setProfile(data);
-          setCurrentUserRole(data.role ?? 'member');
+          setCurrentUserRole(data.role ?? 'user');
           setCurrentUserName(data.full_name ?? '');
         }
       } finally {
@@ -1686,14 +1686,14 @@ function WebCRM() {
                     </View>
                   )}
                   {allProfiles.map((p: any) => {
-                    const ROLE_OPTIONS = ['member', 'intercessor', 'pastor'] as const;
+                    const ROLE_OPTIONS = ['user', 'intercessor', 'pastor'] as const;
                     type RoleKey = typeof ROLE_OPTIONS[number];
                     const roleMeta: Record<RoleKey, { label: string; color: string; bg: string }> = {
                       pastor:      { label: 'Pastor',    color: '#a78bfa', bg: 'rgba(124,58,237,0.2)'  },
                       intercessor: { label: 'Intercesor',color: '#2dd4bf', bg: 'rgba(20,184,166,0.2)'  },
-                      member:      { label: 'Miembro',   color: '#94a3b8', bg: 'rgba(100,116,139,0.2)' },
+                      user:        { label: 'Miembro',   color: '#94a3b8', bg: 'rgba(100,116,139,0.2)' },
                     };
-                    const meta = roleMeta[(p.role as RoleKey) ?? 'member'] ?? roleMeta.member;
+                    const meta = roleMeta[(p.role as RoleKey) ?? 'user'] ?? roleMeta.user;
                     const isUpdating = roleUpdating === p.id;
                     return (
                       <View

@@ -90,11 +90,11 @@ export default function LoginScreen() {
     if (!validateRegister()) return;
     setLoading(true);
     try {
-      // All users register as 'member'. Role is assigned by pastor from CRM.
+      // All users register as 'user'. Role is assigned by pastor from CRM.
       const { error, data } = await supabase.auth.signUp({
         email: email.trim(),
         password,
-        options: { data: { full_name: nombre.trim(), role: 'member' } },
+        options: { data: { full_name: nombre.trim(), role: 'user' } },
       });
       if (error) throw error;
       if (data.user) {
@@ -102,7 +102,7 @@ export default function LoginScreen() {
         await supabase.from('profiles').upsert({
           id: data.user.id,
           full_name: nombre.trim(),
-          role: 'member',
+          role: 'user',
         });
         await AsyncStorage.setItem('@war_room_cached_name', nombre.trim());
         await AsyncStorage.setItem('@war_room_profile_complete', 'true');
