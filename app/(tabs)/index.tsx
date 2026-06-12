@@ -123,13 +123,78 @@ async function getAISuggestion(
     });
     const data = await response.json();
     const text = data.content[0].text;
+    console.log('Raw AI response:', text);
     return JSON.parse(text);
-  } catch {
+  } catch (e) {
+    console.error('AI suggestion failed:', e);
     return {
       verse: 'No os ha sobrevenido ninguna tentación que no sea humana; pero fiel es Dios.',
       verseRef: '1 Corintios 10:13',
       prayer: 'Señor, te traemos esta situación y confiamos en Tu fidelidad. Guía, sana y fortalece a quien te busca en este momento.',
       encouragement: 'Dios es fiel y está contigo en este momento. Él tiene el control.',
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TWO-STEP AI FLOW: verse options → guided prayer
+// ─────────────────────────────────────────────────────────────
+type VerseOption = { verse: string; verseRef: string; angle: string };
+type GuidedPrayer = { prayer: string; encouragement: string };
+
+async function callAnthropic(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_KEY!,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5',
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: userPrompt }],
+      system: systemPrompt,
+    }),
+  });
+  const data = await response.json();
+  const text = data.content[0].text;
+  console.log('Raw AI response:', text);
+  return text;
+}
+
+async function getVerseOptions(content: string, category: string): Promise<VerseOption[]> {
+  const systemPrompt = `Eres un consejero pastoral. Dada una petición de oración, sugiere 3 versículos bíblicos DIFERENTES y específicamente relevantes al contenido — cada uno desde un ángulo distinto (promesa, consuelo, guía práctica). Responde SOLO JSON.`;
+  const userPrompt = `Petición (${category}): "${content}"\nResponde en este JSON exacto:\n{"options": [\n  {"verse": "...", "verseRef": "...", "angle": "Promesa"},\n  {"verse": "...", "verseRef": "...", "angle": "Consuelo"},\n  {"verse": "...", "verseRef": "...", "angle": "Guía"}\n]}`;
+  try {
+    const text = await callAnthropic(systemPrompt, userPrompt, 700);
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed.options) && parsed.options.length > 0) return parsed.options;
+    throw new Error('Invalid options shape');
+  } catch (e) {
+    console.error('Verse options failed:', e);
+    return [
+      { verse: 'Mi Dios, pues, suplirá todo lo que os falta conforme a sus riquezas en gloria en Cristo Jesús.', verseRef: 'Filipenses 4:19', angle: 'Promesa' },
+      { verse: 'Venid a mí todos los que estáis trabajados y cargados, y yo os haré descansar.', verseRef: 'Mateo 11:28', angle: 'Consuelo' },
+      { verse: 'Fíate de Jehová de todo tu corazón, y no te apoyes en tu propia prudencia.', verseRef: 'Proverbios 3:5', angle: 'Guía' },
+    ];
+  }
+}
+
+async function getGuidedPrayer(
+  content: string, category: string, chosenVerse: string, chosenVerseRef: string
+): Promise<GuidedPrayer> {
+  const systemPrompt = `Eres un consejero pastoral. Genera una oración guiada de 3-4 oraciones que conecte específicamente el versículo dado con la situación de la persona. Sé concreto, no genérico — menciona elementos de su situación real. Responde SOLO JSON.`;
+  const userPrompt = `Situación (${category}): "${content}"\nVersículo elegido: "${chosenVerse}" (${chosenVerseRef})\nResponde: {"prayer": "...", "encouragement": "..."}`;
+  try {
+    const text = await callAnthropic(systemPrompt, userPrompt, 500);
+    return JSON.parse(text);
+  } catch (e) {
+    console.error('Guided prayer failed:', e);
+    return {
+      prayer: `Señor, traemos ante Ti esta situación confiando en Tu palabra: "${chosenVerse}" (${chosenVerseRef}). Obra con poder, da paz y dirige cada paso. En el nombre de Jesús, amén.`,
+      encouragement: 'Dios escucha tu oración y Su palabra no vuelve vacía.',
     };
   }
 }
@@ -356,6 +421,14 @@ function WebCRM() {
   // AI Suggestion — Pastor (Feature 1B)
   const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
   const [aiLoading,    setAiLoading]    = useState(false);
+
+  // Two-step AI flow — Member (verse options → guided prayer)
+  const [verseOptions,  setVerseOptions]  = useState<VerseOption[] | null>(null);
+  const [selectedVerse, setSelectedVerse] = useState<VerseOption | null>(null);
+  const [guidedPrayer,  setGuidedPrayer]  = useState<GuidedPrayer | null>(null);
+  const [guidedLoading, setGuidedLoading] = useState(false);
+  const [memberAiContent, setMemberAiContent] = useState('');
+  const [memberAiCat,     setMemberAiCat]     = useState('otro');
 
   // Analytics (Feature 2)
   const [analyticsData,     setAnalyticsData]     = useState<any[]>([]);
@@ -647,15 +720,19 @@ function WebCRM() {
       setMemberTotalCount(prev => (prev ?? 0) + 1);
       if (memberVisibility === 'congregation') setWallPendingCount(prev => prev + 1);
 
-      // Trigger AI suggestion
+      // Trigger AI two-step flow: stage 1 — verse options
       const insertedId = (inserted as any)?.id ?? null;
       setMemberAiRequestId(insertedId);
       setLastInsertedId(insertedId);
-      setMemberAiSuggestion(null);
+      setMemberAiContent(savedContent);
+      setMemberAiCat(savedCat);
+      setVerseOptions(null);
+      setSelectedVerse(null);
+      setGuidedPrayer(null);
       setMemberAiVisible(true);
       setMemberAiLoading(true);
-      getAISuggestion(savedContent, savedCat, 'member').then(s => {
-        setMemberAiSuggestion(s);
+      getVerseOptions(savedContent, savedCat).then(opts => {
+        setVerseOptions(opts);
         setMemberAiLoading(false);
       });
     } catch (err: any) {
@@ -665,19 +742,32 @@ function WebCRM() {
     }
   };
 
+  // Stage 1 → Stage 2: user picked a verse, generate the contextual prayer
+  const handleSelectVerse = (option: VerseOption) => {
+    setSelectedVerse(option);
+    setGuidedPrayer(null);
+    setGuidedLoading(true);
+    getGuidedPrayer(memberAiContent, memberAiCat, option.verse, option.verseRef).then(gp => {
+      setGuidedPrayer(gp);
+      setGuidedLoading(false);
+    });
+  };
+
   const handleSaveAiToRequest = async () => {
     const targetId = lastInsertedId ?? memberAiRequestId;
     setMemberAiSaving(true);
-    if (targetId && memberAiSuggestion) {
+    if (targetId && selectedVerse && guidedPrayer) {
       await supabase.from('prayer_requests').update({
-        ai_verse:  `${memberAiSuggestion.verse} — ${memberAiSuggestion.verseRef}`,
-        ai_prayer: memberAiSuggestion.prayer,
+        ai_verse:  `${selectedVerse.verse} — ${selectedVerse.verseRef} (${selectedVerse.angle})`,
+        ai_prayer: guidedPrayer.prayer,
       }).eq('id', targetId);
       fetchMemberPrayers();
     }
     setMemberAiSaving(false);
     setMemberAiVisible(false);
-    setMemberAiSuggestion(null);
+    setVerseOptions(null);
+    setSelectedVerse(null);
+    setGuidedPrayer(null);
     setMemberAiRequestId(null);
     setLastInsertedId(null);
   };
@@ -1195,59 +1285,97 @@ function WebCRM() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                     <Text style={{ fontSize: 20 }}>✨</Text>
                     <Text style={{ color: '#a78bfa', fontSize: 16, fontWeight: '600', flex: 1 }}>Palabra para ti</Text>
-                    <Pressable onPress={() => { setMemberAiVisible(false); setMemberAiSuggestion(null); }}>
+                    <Pressable onPress={() => { setMemberAiVisible(false); setVerseOptions(null); setSelectedVerse(null); setGuidedPrayer(null); }}>
                       <Ionicons name="close" size={20} color="#475569" />
                     </Pressable>
                   </View>
 
                   {memberAiLoading ? (
+                    /* Loading stage 1 */
                     <View style={[w.aiCard, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
                       <ActivityIndicator color="#a78bfa" />
-                      <Text style={{ color: '#64748b', fontSize: 13 }}>Buscando un versículo para ti…</Text>
+                      <Text style={{ color: '#64748b', fontSize: 13 }}>Buscando versículos para tu situación…</Text>
                     </View>
-                  ) : memberAiSuggestion ? (
+                  ) : selectedVerse ? (
+                    /* ── STAGE 2 — selected verse + guided prayer ── */
                     <>
-                      {/* Verse */}
-                      <View style={[w.aiCard, { marginBottom: 12 }]}>
-                        <Text style={[w.sectionLbl, { marginBottom: 10, color: '#7c3aed' }]}>📖 VERSÍCULO</Text>
-                        <View style={{ backgroundColor: 'rgba(124,58,237,0.08)', borderRadius: 12, padding: 14 }}>
-                          <Text style={{ color: '#c4b5fd', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
-                            {memberAiSuggestion.verse}
-                          </Text>
-                          <Text style={{ color: '#7c3aed', fontSize: 12, textAlign: 'right', marginTop: 6 }}>
-                            {memberAiSuggestion.verseRef}
-                          </Text>
+                      <View style={[w.aiCard, { marginBottom: 12, borderColor: '#7c3aed', borderWidth: 1 }]}>
+                        <Text style={{ color: '#a78bfa', fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' as any, marginBottom: 8 }}>
+                          {selectedVerse.angle}
+                        </Text>
+                        <Text style={{ color: '#c4b5fd', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
+                          {selectedVerse.verse}
+                        </Text>
+                        <Text style={{ color: '#7c3aed', fontSize: 12, textAlign: 'right', marginTop: 6 }}>
+                          {selectedVerse.verseRef}
+                        </Text>
+                      </View>
+
+                      {guidedLoading ? (
+                        <View style={[w.aiCard, { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }]}>
+                          <ActivityIndicator color="#a78bfa" />
+                          <Text style={{ color: '#64748b', fontSize: 13 }}>Escribiendo tu oración guiada…</Text>
                         </View>
-                      </View>
+                      ) : guidedPrayer ? (
+                        <>
+                          <View style={[w.aiCard, { marginBottom: 12 }]}>
+                            <Text style={[w.sectionLbl, { marginBottom: 6 }]}>🙏 ORACIÓN GUIADA</Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 13, lineHeight: 20 }}>
+                              {guidedPrayer.prayer}
+                            </Text>
+                          </View>
 
-                      {/* Prayer */}
-                      <View style={[w.aiCard, { marginBottom: 12 }]}>
-                        <Text style={[w.sectionLbl, { marginBottom: 6 }]}>🙏 ORACIÓN GUIADA</Text>
-                        <Text style={{ color: '#94a3b8', fontSize: 13, lineHeight: 20 }}>
-                          {memberAiSuggestion.prayer}
-                        </Text>
-                      </View>
+                          <View style={[w.aiCard, { marginBottom: 20 }]}>
+                            <Text style={{ color: '#e2e8f0', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
+                              💡 {guidedPrayer.encouragement}
+                            </Text>
+                          </View>
 
-                      {/* Encouragement */}
-                      <View style={[w.aiCard, { marginBottom: 20 }]}>
-                        <Text style={{ color: '#e2e8f0', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
-                          💡 {memberAiSuggestion.encouragement}
-                        </Text>
-                      </View>
-
-                      <Pressable
-                        style={[w.victoriaBtn, { backgroundColor: '#7c3aed', marginBottom: 10 }]}
-                        onPress={handleSaveAiToRequest}
-                        disabled={memberAiSaving}
-                      >
-                        {memberAiSaving
-                          ? <ActivityIndicator color="#fff" />
-                          : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar con mi petición</Text>}
-                      </Pressable>
+                          <Pressable
+                            style={[w.victoriaBtn, { backgroundColor: '#7c3aed', marginBottom: 10 }]}
+                            onPress={handleSaveAiToRequest}
+                            disabled={memberAiSaving}
+                          >
+                            {memberAiSaving
+                              ? <ActivityIndicator color="#fff" />
+                              : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar con mi petición</Text>}
+                          </Pressable>
+                        </>
+                      ) : null}
 
                       <Pressable
                         style={{ alignItems: 'center', paddingVertical: 10 }}
-                        onPress={() => { setMemberAiVisible(false); setMemberAiSuggestion(null); }}
+                        onPress={() => { setSelectedVerse(null); setGuidedPrayer(null); }}
+                      >
+                        <Text style={{ color: '#a78bfa', fontSize: 13 }}>← Elegir otro versículo</Text>
+                      </Pressable>
+                    </>
+                  ) : verseOptions ? (
+                    /* ── STAGE 1 — pick one of 3 verses ── */
+                    <>
+                      <Text style={{ color: '#94a3b8', fontSize: 13, marginBottom: 14 }}>
+                        Elige el versículo que más resuene contigo:
+                      </Text>
+                      {verseOptions.map((opt, i) => (
+                        <Pressable
+                          key={i}
+                          style={({ pressed }) => [w.aiCard, { marginBottom: 10 }, pressed && { borderColor: '#7c3aed', opacity: 0.9 }]}
+                          onPress={() => handleSelectVerse(opt)}
+                        >
+                          <Text style={{ color: '#a78bfa', fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' as any, marginBottom: 8 }}>
+                            {opt.angle}
+                          </Text>
+                          <Text style={{ color: '#c4b5fd', fontSize: 14, fontStyle: 'italic', lineHeight: 22 }}>
+                            {opt.verse}
+                          </Text>
+                          <Text style={{ color: '#7c3aed', fontSize: 12, textAlign: 'right', marginTop: 6 }}>
+                            {opt.verseRef}
+                          </Text>
+                        </Pressable>
+                      ))}
+                      <Pressable
+                        style={{ alignItems: 'center', paddingVertical: 10 }}
+                        onPress={() => { setMemberAiVisible(false); setVerseOptions(null); }}
                       >
                         <Text style={{ color: '#475569', fontSize: 13 }}>Cerrar</Text>
                       </Pressable>
