@@ -1017,25 +1017,28 @@ function WebCRM() {
     }
     setJoinCodeSubmitting(true);
     setJoinCodeError('');
-    const { data: invite } = await supabase
+    const { data: invite, error: lookupErr } = await supabase
       .from('invitations')
       .select('inviter_id')
       .eq('code', joinCode.trim())
       .eq('circle_type', 'ministry')
       .single();
+    console.log('Lookup error:', lookupErr);
+    console.log('Invite found:', invite);
     if (!invite) {
       setJoinCodeError('Código no válido');
       setJoinCodeSubmitting(false);
       return;
     }
-    const { error } = await supabase.from('circles').insert({
+    const { error: insertErr } = await supabase.from('circles').insert({
       owner_id:    invite.inviter_id,
       member_id:   currentUserId,
       circle_type: 'ministry',
       status:      'accepted',
     });
+    console.log('Insert error:', insertErr);
     setJoinCodeSubmitting(false);
-    if (error) {
+    if (insertErr) {
       setJoinCodeError('No se pudo unir. Intenta de nuevo.');
       return;
     }
