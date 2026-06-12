@@ -188,12 +188,15 @@ async function getGuidedPrayer(
   const systemPrompt = `Eres un mentor de oración. Tu trabajo NO es parafrasear un versículo — es ENSEÑAR a la persona cómo orar sobre SU situación específica, usando el versículo como fundamento de fe, no como contenido principal.
 
 La oración debe:
-1. Nombrar específicamente los elementos de la situación que la persona mencionó (ej: si menciona deudas, ansiedad, préstamos — nombrarlos directamente, no genéricamente)
-2. Presentar esos elementos concretos ante Dios
-3. Pedir algo específico y accionable (sabiduría para finanzas, paz en medio de la incertidumbre, provisión concreta)
-4. Conectar brevemente con la promesa del versículo elegido AL FINAL, como ancla de fe — no como apertura
+1. Abrir nombrando 2-3 detalles CONCRETOS de la situación que la persona mencionó (sus palabras y temas exactos — ej: si menciona deudas, ansiedad, préstamos — nombrarlos directamente, no genéricamente)
+2. Reconocer honestamente el peso emocional de lo que vive (sin minimizarlo)
+3. Presentar esos elementos concretos ante Dios y pedir algo específico y accionable (sabiduría para finanzas, paz en medio de la incertidumbre, provisión concreta)
+4. Incluir un momento de pausa/reflexión: "Tómate un momento para nombrar ante Dios..." (invita a la persona a añadir sus propias palabras)
+5. Cerrar conectando con la promesa del versículo elegido AL FINAL, como ancla de fe — no como apertura
 
-Formato: 4-5 oraciones cortas, en primera persona plural ('Señor, te traemos...'), lenguaje cálido pero específico, NUNCA genérico. Evita frases tipo 'en este momento', 'confiamos en tu fidelidad' como apertura — empieza nombrando la situación real.
+La oración debe sentirse como si un mentor espiritual estuviera sentado contigo, conoce tu situación en detalle, y te está guiando paso a paso — no como un texto leído rápido. 6-8 oraciones. Incluye un momento de pausa donde se invita a la persona a añadir sus propias palabras.
+
+Formato: primera persona plural ('Señor, te traemos...'), lenguaje cálido pero específico, NUNCA genérico. Evita frases tipo 'en este momento', 'confiamos en tu fidelidad' como apertura — empieza nombrando la situación real.
 
 Responde SOLO JSON válido.`;
   const userPrompt = `Situación completa de la persona: "${content}"
@@ -203,9 +206,9 @@ Versículo elegido como ancla: "${chosenVerse}" (${chosenVerseRef})
 Identifica 2-3 elementos CONCRETOS de la situación (cosas específicas que la persona mencionó: deudas, préstamos, ansiedad, decisiones pendientes, etc.) y constrúyelos en la oración.
 
 Responde:
-{"prayer": "oración de 4-5 oraciones que nombra elementos concretos y termina conectando con el versículo", "encouragement": "una frase breve y práctica — no genérica — sobre qué hacer hoy con esta oración"}`;
+{"prayer": "oración de 6-8 oraciones que nombra elementos concretos, incluye un momento de pausa y termina conectando con el versículo", "encouragement": "una frase breve y práctica — no genérica — sobre qué hacer hoy con esta oración"}`;
   try {
-    const text = await callAnthropic(systemPrompt, userPrompt, 600);
+    const text = await callAnthropic(systemPrompt, userPrompt, 900);
     return JSON.parse(text);
   } catch (e) {
     console.error('Guided prayer failed:', e);
@@ -446,6 +449,19 @@ function WebCRM() {
   const [guidedLoading, setGuidedLoading] = useState(false);
   const [memberAiContent, setMemberAiContent] = useState('');
   const [memberAiCat,     setMemberAiCat]     = useState('otro');
+
+  // Post-save follow-up (share with family / congregation)
+  const [aiSavedStage,     setAiSavedStage]     = useState(false);
+  const [aiSavedRequestId, setAiSavedRequestId] = useState<string | null>(null);
+  const [aiSharing,        setAiSharing]        = useState(false);
+
+  // Edit / delete member prayers
+  const [editingPrayer,   setEditingPrayer]   = useState<any | null>(null);
+  const [editContent,     setEditContent]     = useState('');
+  const [editCat,         setEditCat]         = useState('salud');
+  const [editUrgent,      setEditUrgent]      = useState(false);
+  const [editSaving,      setEditSaving]      = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Analytics (Feature 2)
   const [analyticsData,     setAnalyticsData]     = useState<any[]>([]);
@@ -770,6 +786,17 @@ function WebCRM() {
     });
   };
 
+  const closeAiPanel = () => {
+    setMemberAiVisible(false);
+    setVerseOptions(null);
+    setSelectedVerse(null);
+    setGuidedPrayer(null);
+    setMemberAiRequestId(null);
+    setLastInsertedId(null);
+    setAiSavedStage(false);
+    setAiSavedRequestId(null);
+  };
+
   const handleSaveAiToRequest = async () => {
     const targetId = lastInsertedId ?? memberAiRequestId;
     setMemberAiSaving(true);
@@ -779,14 +806,75 @@ function WebCRM() {
         ai_prayer: guidedPrayer.prayer,
       }).eq('id', targetId);
       fetchMemberPrayers();
+      // Show follow-up share prompt instead of closing
+      setAiSavedRequestId(targetId);
+      setAiSavedStage(true);
+      setMemberAiSaving(false);
+      return;
     }
     setMemberAiSaving(false);
-    setMemberAiVisible(false);
-    setVerseOptions(null);
-    setSelectedVerse(null);
-    setGuidedPrayer(null);
-    setMemberAiRequestId(null);
-    setLastInsertedId(null);
+    closeAiPanel();
+  };
+
+  // Share saved request with family circle (update, not new insert)
+  const handleShareWithFamily = async () => {
+    if (!aiSavedRequestId) { closeAiPanel(); return; }
+    setAiSharing(true);
+    await supabase.from('prayer_requests').update({
+      visibility: 'circle',
+      space_type: 'family',
+    }).eq('id', aiSavedRequestId);
+    setAiSharing(false);
+    fetchMemberPrayers();
+    closeAiPanel();
+  };
+
+  // Send saved request to congregation wall (pending pastor approval)
+  const handleShareWithCongregation = async () => {
+    if (!aiSavedRequestId) { closeAiPanel(); return; }
+    setAiSharing(true);
+    await supabase.from('prayer_requests').update({
+      visibility: 'congregation',
+      wall_pending: true,
+      wall_approved: false,
+    }).eq('id', aiSavedRequestId);
+    setAiSharing(false);
+    setWallPendingCount(prev => prev + 1);
+    fetchMemberPrayers();
+    closeAiPanel();
+  };
+
+  // ── Edit / delete member prayers ──
+  const startEditPrayer = (item: any) => {
+    setEditingPrayer(item);
+    setEditContent(item.content ?? '');
+    setEditCat(item.category ?? 'salud');
+    setEditUrgent(!!item.urgent);
+    setMemberShowForm(false);
+    setCircleTab('members');
+    setDeleteConfirmId(null);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingPrayer || !editContent.trim()) return;
+    setEditSaving(true);
+    await supabase.from('prayer_requests').update({
+      content:    editContent.trim(),
+      category:   editCat,
+      urgent:     editUrgent,
+      updated_at: new Date().toISOString(),
+    }).eq('id', editingPrayer.id);
+    setEditSaving(false);
+    setEditingPrayer(null);
+    fetchMemberPrayers();
+  };
+
+  const handleDeletePrayerRequest = async (id: string) => {
+    await supabase.from('prayer_requests').delete().eq('id', id);
+    setDeleteConfirmId(null);
+    if (editingPrayer?.id === id) setEditingPrayer(null);
+    setMemberTotalCount(prev => Math.max(0, (prev ?? 1) - 1));
+    fetchMemberPrayers();
   };
 
   // ── Circles (Member) ──
@@ -1185,7 +1273,31 @@ function WebCRM() {
                         </View>
                         {item.urgent && <View style={w.urgentBadge}><Text style={w.urgentTxt}>⚡ URGENTE</Text></View>}
                         <Text style={w.cardTime}>{timeAgo(item.created_at)}</Text>
+                        {/* Edit / delete actions */}
+                        <Pressable style={{ padding: 4 }} onPress={() => startEditPrayer(item)}>
+                          <Ionicons name="pencil-outline" size={15} color="#475569" />
+                        </Pressable>
+                        <Pressable style={{ padding: 4 }} onPress={() => setDeleteConfirmId(prev => prev === item.id ? null : item.id)}>
+                          <Ionicons name="trash-outline" size={15} color={deleteConfirmId === item.id ? '#ef4444' : '#475569'} />
+                        </Pressable>
                       </View>
+                      {deleteConfirmId === item.id && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10, backgroundColor: '#7f1d1d22', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#ef444444' }}>
+                          <Text style={{ color: '#fca5a5', fontSize: 12, flex: 1 }}>¿Eliminar esta petición?</Text>
+                          <Pressable
+                            style={{ backgroundColor: '#ef4444', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 5 }}
+                            onPress={() => handleDeletePrayerRequest(item.id)}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Sí</Text>
+                          </Pressable>
+                          <Pressable
+                            style={{ backgroundColor: '#1e293b', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 5 }}
+                            onPress={() => setDeleteConfirmId(null)}
+                          >
+                            <Text style={{ color: '#94a3b8', fontSize: 12 }}>No</Text>
+                          </Pressable>
+                        </View>
+                      )}
                       <Text style={[w.cardExcerpt, { marginBottom: 8 }]}>{item.content}</Text>
                       <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' as any }}>
                         {item.visibility === 'congregation' && (
@@ -1214,7 +1326,59 @@ function WebCRM() {
 
             {/* Form panel + AI overlay */}
             <View style={w.detail}>
-              {circleTab === 'add' ? (
+              {editingPrayer ? (
+                /* ── Edit prayer request ── */
+                <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                    <Text style={w.detailName}>Editar Petición</Text>
+                    <Pressable style={{ marginLeft: 'auto' as any }} onPress={() => setEditingPrayer(null)}>
+                      <Ionicons name="close" size={20} color="#475569" />
+                    </Pressable>
+                  </View>
+
+                  <Text style={w.sectionLbl}>CATEGORÍA</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' as any, gap: 8, marginBottom: 16 }}>
+                    {NEW_CATS.map(cat => (
+                      <Pressable key={cat} style={[w.catPill, editCat === cat && w.catPillActive]} onPress={() => setEditCat(cat)}>
+                        <Text style={[w.catPillTxt, editCat === cat && { color: '#fff' }]}>
+                          {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <Text style={w.sectionLbl}>PETICIÓN</Text>
+                  <TextInput
+                    style={[w.noteInput as any, { minHeight: 100, marginBottom: 16 }]}
+                    placeholder="Escribe tu petición…"
+                    placeholderTextColor="#475569"
+                    value={editContent}
+                    onChangeText={setEditContent}
+                    multiline
+                    textAlignVertical="top"
+                  />
+
+                  <View style={[w.cardRow, { marginBottom: 20 }]}>
+                    <Text style={[w.sectionLbl, { marginBottom: 0 }]}>¿URGENTE?</Text>
+                    <Switch
+                      value={editUrgent}
+                      onValueChange={setEditUrgent}
+                      trackColor={{ false: '#1e293b', true: '#7c3aed' }}
+                      thumbColor={editUrgent ? '#a78bfa' : '#475569'}
+                    />
+                  </View>
+
+                  <Pressable
+                    style={[w.victoriaBtn, { backgroundColor: '#7c3aed' }]}
+                    onPress={handleEditSave}
+                    disabled={editSaving}
+                  >
+                    {editSaving
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar cambios</Text>}
+                  </Pressable>
+                </ScrollView>
+              ) : circleTab === 'add' ? (
                 <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                     <Text style={w.detailName}>Agregar a mi equipo</Text>
@@ -1302,12 +1466,65 @@ function WebCRM() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                     <Text style={{ fontSize: 20 }}>✨</Text>
                     <Text style={{ color: '#a78bfa', fontSize: 16, fontWeight: '600', flex: 1 }}>Palabra para ti</Text>
-                    <Pressable onPress={() => { setMemberAiVisible(false); setVerseOptions(null); setSelectedVerse(null); setGuidedPrayer(null); }}>
+                    <Pressable onPress={closeAiPanel}>
                       <Ionicons name="close" size={20} color="#475569" />
                     </Pressable>
                   </View>
 
-                  {memberAiLoading ? (
+                  {aiSavedStage ? (
+                    /* ── Post-save follow-up: share options ── */
+                    <>
+                      <View style={[w.aiCard, { marginBottom: 20, alignItems: 'center', paddingVertical: 24 }]}>
+                        <Text style={{ fontSize: 28, marginBottom: 8 }}>✨</Text>
+                        <Text style={{ color: '#e2e8f0', fontSize: 16, fontWeight: '600' }}>Tu oración está guardada</Text>
+                      </View>
+
+                      <Text style={{ color: '#64748b', fontSize: 13, marginBottom: 14 }}>
+                        ¿Quieres sumar más personas a esta oración?
+                      </Text>
+
+                      {circles.some((c: any) => c.circle_type === 'family') ? (
+                        <Pressable
+                          style={[w.aiCard, { marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
+                          disabled={aiSharing}
+                          onPress={handleShareWithFamily}
+                        >
+                          <Text style={{ fontSize: 18 }}>👥</Text>
+                          <Text style={{ color: '#c4b5fd', fontSize: 14, fontWeight: '500', flex: 1 }}>Compartir con mi familia</Text>
+                          {aiSharing && <ActivityIndicator size="small" color="#a78bfa" />}
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          style={[w.aiCard, { marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
+                          onPress={() => { closeAiPanel(); setCircleTab('add'); setSelectedCircleType('family'); setMemberShowForm(false); }}
+                        >
+                          <Text style={{ fontSize: 18 }}>👥</Text>
+                          <Text style={{ color: '#c4b5fd', fontSize: 14, fontWeight: '500', flex: 1 }}>Conectar con mi familia</Text>
+                          <Ionicons name="arrow-forward" size={15} color="#475569" />
+                        </Pressable>
+                      )}
+
+                      <Pressable
+                        style={[w.aiCard, { marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
+                        disabled={aiSharing}
+                        onPress={handleShareWithCongregation}
+                      >
+                        <Text style={{ fontSize: 18 }}>⛪</Text>
+                        <Text style={{ color: '#c4b5fd', fontSize: 14, fontWeight: '500', flex: 1 }}>Pedir oración a mi congregación</Text>
+                        {aiSharing && <ActivityIndicator size="small" color="#a78bfa" />}
+                      </Pressable>
+                      <Text style={{ color: '#334155', fontSize: 11, marginBottom: 16, marginLeft: 4 }}>
+                        El pastor revisará antes de publicarla
+                      </Text>
+
+                      <Pressable
+                        style={{ alignItems: 'center', paddingVertical: 12 }}
+                        onPress={closeAiPanel}
+                      >
+                        <Text style={{ color: '#475569', fontSize: 14 }}>Listo, gracias</Text>
+                      </Pressable>
+                    </>
+                  ) : memberAiLoading ? (
                     /* Loading stage 1 */
                     <View style={[w.aiCard, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
                       <ActivityIndicator color="#a78bfa" />
@@ -1392,7 +1609,7 @@ function WebCRM() {
                       ))}
                       <Pressable
                         style={{ alignItems: 'center', paddingVertical: 10 }}
-                        onPress={() => { setMemberAiVisible(false); setVerseOptions(null); }}
+                        onPress={closeAiPanel}
                       >
                         <Text style={{ color: '#475569', fontSize: 13 }}>Cerrar</Text>
                       </Pressable>
@@ -1475,7 +1692,7 @@ function WebCRM() {
                   >
                     {memberSubmitting
                       ? <ActivityIndicator color="#fff" />
-                      : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar Petición</Text>}
+                      : <Text style={[w.victoriaTxt, { color: '#fff' }]}>✨ Consultar sabiduría</Text>}
                   </Pressable>
                 </ScrollView>
               ) : (
