@@ -409,7 +409,7 @@ function WebCRM() {
   // Prayer Wall (PART 3)
   const [wallRequests,     setWallRequests]     = useState<any[]>([]);
   const [wallLoading,      setWallLoading]      = useState(false);
-  const [wallTab,          setWallTab]          = useState<'approved' | 'pending'>('approved');
+  const [wallTab,          setWallTab]          = useState<'approved' | 'pending' | 'victories'>('approved');
   const [wallPendingCount, setWallPendingCount] = useState(0);
 
   // Visibility selector in new form (PART 4)
@@ -454,6 +454,21 @@ function WebCRM() {
   const [aiSavedStage,     setAiSavedStage]     = useState(false);
   const [aiSavedRequestId, setAiSavedRequestId] = useState<string | null>(null);
   const [aiSharing,        setAiSharing]        = useState(false);
+
+  // Invitation links
+  const [inviteLink,            setInviteLink]            = useState<string | null>(null);
+  const [inviteGenerating,      setInviteGenerating]      = useState(false);
+  const [inviteCopied,          setInviteCopied]          = useState(false);
+  const [ministryInvite,        setMinistryInvite]        = useState<any | null>(null);
+  const [ministryInviteLoading, setMinistryInviteLoading] = useState(false);
+  const [ministryCopied,        setMinistryCopied]        = useState(false);
+
+  // Prayer answered celebration
+  const [celebrationVisible, setCelebrationVisible] = useState(false);
+  const [celebrationRequest, setCelebrationRequest] = useState<any | null>(null);
+  const [testimonyText,      setTestimonyText]      = useState('');
+  const [shareTestimony,     setShareTestimony]     = useState(false);
+  const [testimonySaving,    setTestimonySaving]    = useState(false);
 
   // Edit / delete member prayers
   const [editingPrayer,   setEditingPrayer]   = useState<any | null>(null);
@@ -545,8 +560,19 @@ function WebCRM() {
           if (!error) setAllProfiles(data ?? []);
           setProfilesLoading(false);
         });
+      // Load active ministry invitation code (pastor)
+      if (currentUserId) {
+        supabase
+          .from('invitations')
+          .select('*')
+          .eq('inviter_id', currentUserId)
+          .eq('circle_type', 'ministry')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .then(({ data }) => setMinistryInvite(data?.[0] ?? null));
+      }
     }
-  }, [activeNav]);
+  }, [activeNav, currentUserId]);
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     setRoleUpdating(userId);
@@ -947,6 +973,93 @@ function WebCRM() {
     await fetchPendingInvitations();
   };
 
+  // ── Invitation links ──
+  const handleGenerateInvite = async () => {
+    if (!currentUserId) return;
+    setInviteGenerating(true);
+    setInviteLink(null);
+    const { data, error } = await supabase
+      .from('invitations')
+      .insert({
+        inviter_id:  currentUserId,
+        circle_type: selectedCircleType,
+        code:        Math.random().toString(36).substring(2, 10),
+      })
+      .select()
+      .single();
+    setInviteGenerating(false);
+    if (!error && data) {
+      setInviteLink(`https://prayer-war-room.vercel.app/join/${(data as any).code}`);
+    }
+  };
+
+  const copyLink = async (link: string, setCopied: (v: boolean) => void) => {
+    try {
+      if (Platform.OS === 'web' && (navigator as any)?.clipboard) {
+        await (navigator as any).clipboard.writeText(link);
+      } else {
+        await Share.share({ message: link });
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* user cancelled share */ }
+  };
+
+  // ── Pastor ministry invitation ──
+  const handleGenerateMinistryInvite = async () => {
+    if (!currentUserId) return;
+    setMinistryInviteLoading(true);
+    // Invalidate previous ministry codes for this pastor
+    await supabase.from('invitations')
+      .delete()
+      .eq('inviter_id', currentUserId)
+      .eq('circle_type', 'ministry');
+    const { data } = await supabase
+      .from('invitations')
+      .insert({
+        inviter_id:  currentUserId,
+        circle_type: 'ministry',
+        ministry_id: currentUserId,
+        code:        Math.random().toString(36).substring(2, 10),
+      })
+      .select()
+      .single();
+    setMinistryInvite(data ?? null);
+    setMinistryInviteLoading(false);
+  };
+
+  // ── Prayer answered celebration ──
+  const handleMarkAnswered = async (item: any) => {
+    await supabase.from('prayer_requests').update({
+      status:       'victory',
+      victory_date: new Date().toISOString(),
+    }).eq('id', item.id);
+    setCelebrationRequest(item);
+    setTestimonyText('');
+    setShareTestimony(false);
+    setCelebrationVisible(true);
+    fetchMemberPrayers();
+  };
+
+  const handleSaveTestimony = async () => {
+    if (!celebrationRequest) { setCelebrationVisible(false); return; }
+    setTestimonySaving(true);
+    const updates: any = {};
+    if (testimonyText.trim()) updates.testimony = testimonyText.trim();
+    if (shareTestimony && testimonyText.trim()) {
+      updates.visibility    = 'congregation';
+      updates.wall_approved = true;
+      updates.wall_pending  = false;
+    }
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('prayer_requests').update(updates).eq('id', celebrationRequest.id);
+    }
+    setTestimonySaving(false);
+    setCelebrationVisible(false);
+    setCelebrationRequest(null);
+    fetchMemberPrayers();
+  };
+
   // Keep selected fresh when realtime updates arrive
   useEffect(() => {
     if (selected) {
@@ -1318,6 +1431,20 @@ function WebCRM() {
                           </View>
                         )}
                       </View>
+                      {item.status !== 'victory' && (
+                        <Pressable
+                          style={{ marginTop: 10, borderWidth: 1, borderColor: '#fbbf2455', backgroundColor: '#78350f22', borderRadius: 10, paddingVertical: 8, alignItems: 'center' }}
+                          onPress={() => handleMarkAnswered(item)}
+                        >
+                          <Text style={{ color: '#fbbf24', fontSize: 13, fontWeight: '600' }}>🙌 Oración Concedida</Text>
+                        </Pressable>
+                      )}
+                      {item.testimony && (
+                        <View style={{ marginTop: 10, backgroundColor: '#78350f15', borderRadius: 10, padding: 10, borderLeftWidth: 3, borderLeftColor: '#fbbf24' }}>
+                          <Text style={{ color: '#fbbf24', fontSize: 11, fontWeight: '700', marginBottom: 4 }}>TESTIMONIO</Text>
+                          <Text style={{ color: '#d1c5a8', fontSize: 12, fontStyle: 'italic', lineHeight: 18 }}>{item.testimony}</Text>
+                        </View>
+                      )}
                     </View>
                   ))}
                 </ScrollView>
@@ -1393,7 +1520,7 @@ function WebCRM() {
                       <Pressable
                         key={t}
                         style={[w.catPill, selectedCircleType === t && w.catPillActive]}
-                        onPress={() => setSelectedCircleType(t)}
+                        onPress={() => { setSelectedCircleType(t); setInviteLink(null); }}
                       >
                         <Text style={[w.catPillTxt, selectedCircleType === t && { color: '#fff' }]}>
                           {t === 'family' ? 'Familia' : t === 'friends' ? 'Amigos' : 'Ministerio'}
@@ -1401,6 +1528,44 @@ function WebCRM() {
                       </Pressable>
                     ))}
                   </View>
+
+                  {/* Invitation link generator */}
+                  <Pressable
+                    style={{ borderWidth: 1, borderColor: '#334155', borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginBottom: 12, flexDirection: 'row', justifyContent: 'center', gap: 8 }}
+                    disabled={inviteGenerating}
+                    onPress={handleGenerateInvite}
+                  >
+                    {inviteGenerating
+                      ? <ActivityIndicator size="small" color="#a78bfa" />
+                      : (
+                        <>
+                          <Ionicons name="link-outline" size={15} color="#94a3b8" />
+                          <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Generar enlace de invitación</Text>
+                        </>
+                      )}
+                  </Pressable>
+
+                  {inviteLink && (
+                    <View style={[w.aiCard, { marginBottom: 16 }]}>
+                      <Text style={{ color: '#c4b5fd', fontSize: 12, marginBottom: 10 }} selectable numberOfLines={1}>
+                        {inviteLink}
+                      </Text>
+                      <Pressable
+                        style={[w.victoriaBtn, { backgroundColor: '#7c3aed', paddingVertical: 8, marginBottom: 8 }]}
+                        onPress={() => copyLink(inviteLink, setInviteCopied)}
+                      >
+                        <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 13 }]}>
+                          {inviteCopied ? '✓ Copiado' : 'Copiar enlace'}
+                        </Text>
+                      </Pressable>
+                      <Text style={{ color: '#334155', fontSize: 11 }}>Este enlace expira en 30 días</Text>
+                      {selectedCircleType === 'ministry' && (
+                        <Text style={{ color: '#334155', fontSize: 11, marginTop: 2 }}>
+                          Cualquiera con este enlace se conectará a tu ministerio
+                        </Text>
+                      )}
+                    </View>
+                  )}
 
                   <Text style={w.sectionLbl}>BUSCAR MIEMBRO</Text>
                   <View style={[w.searchBar, { marginBottom: 12 }]}>
@@ -1704,6 +1869,63 @@ function WebCRM() {
             </View>
           </View>
         </View>
+
+        {/* Celebration modal — prayer answered */}
+        <Modal visible={celebrationVisible} transparent animationType="fade" onRequestClose={() => setCelebrationVisible(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: '#0f0f1a', borderRadius: 20, padding: 28, width: '100%', maxWidth: 420, borderWidth: 1, borderColor: '#fbbf2444' }}>
+              <Text style={{ fontSize: 44, textAlign: 'center', marginBottom: 8 }}>🏆</Text>
+              <Text style={{ color: '#fbbf24', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 6 }}>
+                ¡Gloria a Dios! 🎉
+              </Text>
+              <Text style={{ color: '#94a3b8', fontSize: 14, textAlign: 'center', marginBottom: 20 }}>
+                Tu oración sobre {celebrationRequest?.category ?? 'tu petición'} fue concedida
+              </Text>
+
+              <Text style={[w.sectionLbl, { marginBottom: 6 }]}>¿QUIERES COMPARTIR CÓMO DIOS RESPONDIÓ? (opcional)</Text>
+              <TextInput
+                style={[w.noteInput as any, { minHeight: 80, marginBottom: 14 }]}
+                placeholder="Escribe tu testimonio…"
+                placeholderTextColor="#475569"
+                value={testimonyText}
+                onChangeText={setTestimonyText}
+                multiline
+                textAlignVertical="top"
+              />
+
+              {testimonyText.trim().length > 0 && (
+                <Pressable
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}
+                  onPress={() => setShareTestimony(v => !v)}
+                >
+                  <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 1, borderColor: shareTestimony ? '#fbbf24' : '#334155', backgroundColor: shareTestimony ? '#fbbf24' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                    {shareTestimony && <Ionicons name="checkmark" size={12} color="#0f0f1a" />}
+                  </View>
+                  <Text style={{ color: '#94a3b8', fontSize: 13, flex: 1 }}>
+                    Compartir este testimonio en la Pared de Oración
+                  </Text>
+                </Pressable>
+              )}
+
+              <Pressable
+                style={[w.victoriaBtn, { backgroundColor: '#fbbf24', marginBottom: 8 }]}
+                onPress={handleSaveTestimony}
+                disabled={testimonySaving}
+              >
+                {testimonySaving
+                  ? <ActivityIndicator color="#0f0f1a" />
+                  : <Text style={[w.victoriaTxt, { color: '#0f0f1a' }]}>Guardar</Text>}
+              </Pressable>
+
+              <Pressable
+                style={{ alignItems: 'center', paddingVertical: 8 }}
+                onPress={() => { setCelebrationVisible(false); setCelebrationRequest(null); }}
+              >
+                <Text style={{ color: '#475569', fontSize: 13 }}>Cerrar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -1817,6 +2039,12 @@ function WebCRM() {
                     </View>
                   )}
                 </Pressable>
+                <Pressable
+                  style={[{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 10 }, wallTab === 'victories' && { backgroundColor: '#b45309' }]}
+                  onPress={() => setWallTab('victories')}
+                >
+                  <Text style={{ color: wallTab === 'victories' ? '#fff' : '#64748b', fontWeight: '600', fontSize: 14 }}>🏆 Victorias</Text>
+                </Pressable>
               </View>
 
               {wallLoading ? (
@@ -1825,7 +2053,33 @@ function WebCRM() {
                 </View>
               ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, gap: 10 }}>
-                  {wallTab === 'approved' ? (
+                  {wallTab === 'victories' ? (
+                    wallRequests.filter((r: any) => r.status === 'victory').length === 0 ? (
+                      <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
+                        <Text style={{ fontSize: 40 }}>🏆</Text>
+                        <Text style={{ color: '#334155', fontSize: 14 }}>Aún no hay victorias compartidas</Text>
+                      </View>
+                    ) : wallRequests.filter((r: any) => r.status === 'victory').map((r: any) => (
+                      <View key={r.id} style={[w.card, { borderColor: '#fbbf2444', borderWidth: 1 }]}>
+                        <View style={w.cardRow}>
+                          <View style={[w.badge, { backgroundColor: '#78350f22', borderColor: '#fbbf2455' }]}>
+                            <Text style={[w.badgeTxt, { color: '#fbbf24' }]}>🏆 Victoria</Text>
+                          </View>
+                          <Text style={w.cardTime}>{timeAgo(r.victory_date ?? r.created_at)}</Text>
+                        </View>
+                        {!r.anonymous && r.title && (
+                          <Text style={{ color: '#64748b', fontSize: 12, marginBottom: 6 }}>{r.title} {toFlag(r.country_code)}</Text>
+                        )}
+                        <Text style={w.cardExcerpt}>{r.content}</Text>
+                        {r.testimony && (
+                          <View style={{ marginTop: 10, backgroundColor: '#78350f15', borderRadius: 10, padding: 12, borderLeftWidth: 3, borderLeftColor: '#fbbf24' }}>
+                            <Text style={{ color: '#fbbf24', fontSize: 11, fontWeight: '700', marginBottom: 4 }}>TESTIMONIO</Text>
+                            <Text style={{ color: '#d1c5a8', fontSize: 13, fontStyle: 'italic', lineHeight: 19 }}>{r.testimony}</Text>
+                          </View>
+                        )}
+                      </View>
+                    ))
+                  ) : wallTab === 'approved' ? (
                     wallRequests.filter((r: any) => r.wall_approved).length === 0 ? (
                       <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
                         <Ionicons name="earth-outline" size={44} color="#1e293b" />
@@ -2088,6 +2342,52 @@ function WebCRM() {
                 </View>
               ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 6 }}>
+                  {/* Ministry invitation section */}
+                  <View style={[w.card, { padding: 16, marginBottom: 12 }]}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 4 }}>⛪ Invitación al Ministerio</Text>
+                    <Text style={{ color: '#475569', fontSize: 12, marginBottom: 14 }}>
+                      Comparte este enlace con tu congregación:
+                    </Text>
+                    {ministryInvite ? (
+                      <>
+                        <View style={[w.aiCard, { marginBottom: 10, padding: 12 }]}>
+                          <Text style={{ color: '#c4b5fd', fontSize: 12 }} selectable numberOfLines={1}>
+                            https://prayer-war-room.vercel.app/join/{ministryInvite.code}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <Pressable
+                            style={[w.victoriaBtn, { backgroundColor: '#7c3aed', paddingVertical: 8, paddingHorizontal: 16, marginBottom: 0, flex: 1 }]}
+                            onPress={() => copyLink(`https://prayer-war-room.vercel.app/join/${ministryInvite.code}`, setMinistryCopied)}
+                          >
+                            <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 13 }]}>
+                              {ministryCopied ? '✓ Copiado' : 'Copiar enlace'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={{ borderWidth: 1, borderColor: '#334155', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' }}
+                            disabled={ministryInviteLoading}
+                            onPress={handleGenerateMinistryInvite}
+                          >
+                            {ministryInviteLoading
+                              ? <ActivityIndicator size="small" color="#a78bfa" />
+                              : <Text style={{ color: '#94a3b8', fontSize: 13 }}>Regenerar código</Text>}
+                          </Pressable>
+                        </View>
+                      </>
+                    ) : (
+                      <Pressable
+                        style={[w.victoriaBtn, { backgroundColor: '#7c3aed', paddingVertical: 10, marginBottom: 0 }]}
+                        disabled={ministryInviteLoading}
+                        onPress={handleGenerateMinistryInvite}
+                      >
+                        {ministryInviteLoading
+                          ? <ActivityIndicator color="#fff" />
+                          : <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 13 }]}>Generar nuevo código</Text>}
+                      </Pressable>
+                    )}
+                  </View>
+
                   {allProfiles.length === 0 && (
                     <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
                       <Ionicons name="people-outline" size={44} color="#1e293b" />
