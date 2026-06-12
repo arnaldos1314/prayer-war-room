@@ -185,16 +185,33 @@ async function getVerseOptions(content: string, category: string): Promise<Verse
 async function getGuidedPrayer(
   content: string, category: string, chosenVerse: string, chosenVerseRef: string
 ): Promise<GuidedPrayer> {
-  const systemPrompt = `Eres un consejero pastoral. Genera una oración guiada de 3-4 oraciones que conecte específicamente el versículo dado con la situación de la persona. Sé concreto, no genérico — menciona elementos de su situación real. Responde SOLO JSON.`;
-  const userPrompt = `Situación (${category}): "${content}"\nVersículo elegido: "${chosenVerse}" (${chosenVerseRef})\nResponde: {"prayer": "...", "encouragement": "..."}`;
+  const systemPrompt = `Eres un mentor de oración. Tu trabajo NO es parafrasear un versículo — es ENSEÑAR a la persona cómo orar sobre SU situación específica, usando el versículo como fundamento de fe, no como contenido principal.
+
+La oración debe:
+1. Nombrar específicamente los elementos de la situación que la persona mencionó (ej: si menciona deudas, ansiedad, préstamos — nombrarlos directamente, no genéricamente)
+2. Presentar esos elementos concretos ante Dios
+3. Pedir algo específico y accionable (sabiduría para finanzas, paz en medio de la incertidumbre, provisión concreta)
+4. Conectar brevemente con la promesa del versículo elegido AL FINAL, como ancla de fe — no como apertura
+
+Formato: 4-5 oraciones cortas, en primera persona plural ('Señor, te traemos...'), lenguaje cálido pero específico, NUNCA genérico. Evita frases tipo 'en este momento', 'confiamos en tu fidelidad' como apertura — empieza nombrando la situación real.
+
+Responde SOLO JSON válido.`;
+  const userPrompt = `Situación completa de la persona: "${content}"
+Categoría: ${category}
+Versículo elegido como ancla: "${chosenVerse}" (${chosenVerseRef})
+
+Identifica 2-3 elementos CONCRETOS de la situación (cosas específicas que la persona mencionó: deudas, préstamos, ansiedad, decisiones pendientes, etc.) y constrúyelos en la oración.
+
+Responde:
+{"prayer": "oración de 4-5 oraciones que nombra elementos concretos y termina conectando con el versículo", "encouragement": "una frase breve y práctica — no genérica — sobre qué hacer hoy con esta oración"}`;
   try {
-    const text = await callAnthropic(systemPrompt, userPrompt, 500);
+    const text = await callAnthropic(systemPrompt, userPrompt, 600);
     return JSON.parse(text);
   } catch (e) {
     console.error('Guided prayer failed:', e);
     return {
-      prayer: `Señor, traemos ante Ti esta situación confiando en Tu palabra: "${chosenVerse}" (${chosenVerseRef}). Obra con poder, da paz y dirige cada paso. En el nombre de Jesús, amén.`,
-      encouragement: 'Dios escucha tu oración y Su palabra no vuelve vacía.',
+      prayer: `Señor, traemos ante ti la situación de ${category} que estamos viviendo — las cargas, las dudas, lo que nos quita la paz. Te pedimos sabiduría para los próximos pasos y te entregamos lo que no podemos controlar. Confiamos en tu promesa: "${chosenVerse}" (${chosenVerseRef}).`,
+      encouragement: 'Vuelve a esta oración hoy antes de tomar cualquier decisión sobre esta situación.',
     };
   }
 }
