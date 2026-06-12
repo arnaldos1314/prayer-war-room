@@ -78,12 +78,7 @@ export default function LoginScreen() {
       if (error) throw error;
       const name = data.user?.user_metadata?.full_name ?? data.user?.email?.split('@')[0] ?? '';
       if (name) await AsyncStorage.setItem('@war_room_cached_name', name);
-      const pending = await AsyncStorage.getItem('@pending_invitation');
-      if (pending) {
-        router.replace(`/join/${pending}` as any);
-      } else {
-        router.replace('/(tabs)');
-      }
+      router.replace('/(tabs)');
     } catch (err: any) {
       setMsg(err?.message ?? 'Error desconocido');
     } finally {
@@ -111,12 +106,7 @@ export default function LoginScreen() {
         });
         await AsyncStorage.setItem('@war_room_cached_name', nombre.trim());
         await AsyncStorage.setItem('@war_room_profile_complete', 'true');
-        const pending = await AsyncStorage.getItem('@pending_invitation');
-        if (pending) {
-          router.replace(`/join/${pending}` as any);
-        } else {
-          router.replace('/(tabs)');
-        }
+        router.replace('/(tabs)');
       } else {
         setMsgOk(true);
         setMsg('¡Cuenta creada! Revisa tu email para confirmarla.');

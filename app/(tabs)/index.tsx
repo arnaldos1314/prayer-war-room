@@ -455,13 +455,13 @@ function WebCRM() {
   const [aiSavedRequestId, setAiSavedRequestId] = useState<string | null>(null);
   const [aiSharing,        setAiSharing]        = useState(false);
 
-  // Invitation links
-  const [inviteLink,            setInviteLink]            = useState<string | null>(null);
-  const [inviteGenerating,      setInviteGenerating]      = useState(false);
-  const [inviteCopied,          setInviteCopied]          = useState(false);
+  // Ministry code (pastor) + join-by-code (member)
   const [ministryInvite,        setMinistryInvite]        = useState<any | null>(null);
   const [ministryInviteLoading, setMinistryInviteLoading] = useState(false);
-  const [ministryCopied,        setMinistryCopied]        = useState(false);
+  const [joinCode,              setJoinCode]              = useState('');
+  const [joinCodeError,         setJoinCodeError]         = useState('');
+  const [joinCodeSuccess,       setJoinCodeSuccess]       = useState(false);
+  const [joinCodeSubmitting,    setJoinCodeSubmitting]    = useState(false);
 
   // Prayer answered celebration
   const [celebrationVisible, setCelebrationVisible] = useState(false);
@@ -560,16 +560,30 @@ function WebCRM() {
           if (!error) setAllProfiles(data ?? []);
           setProfilesLoading(false);
         });
-      // Load active ministry invitation code (pastor)
+      // Load (or auto-create) the pastor's ministry code — one per pastor
       if (currentUserId) {
-        supabase
-          .from('invitations')
-          .select('*')
-          .eq('inviter_id', currentUserId)
-          .eq('circle_type', 'ministry')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .then(({ data }) => setMinistryInvite(data?.[0] ?? null));
+        (async () => {
+          const { data } = await supabase
+            .from('invitations')
+            .select('*')
+            .eq('inviter_id', currentUserId)
+            .eq('circle_type', 'ministry')
+            .limit(1);
+          if (data && data.length > 0) {
+            setMinistryInvite(data[0]);
+            return;
+          }
+          // No code yet — generate one
+          const code = Math.floor(100000 + Math.random() * 900000).toString();
+          const { data: created, error } = await supabase.from('invitations').upsert({
+            inviter_id:  currentUserId,
+            ministry_id: currentUserId,
+            circle_type: 'ministry',
+            code,
+          }, { onConflict: 'inviter_id,circle_type' }).select().single();
+          if (error) console.error('[MinistryCode] auto-create failed:', error);
+          setMinistryInvite(created ?? null);
+        })();
       }
     }
   }, [activeNav, currentUserId]);
@@ -973,63 +987,59 @@ function WebCRM() {
     await fetchPendingInvitations();
   };
 
-  // ── Invitation links ──
-  const handleGenerateInvite = async () => {
-    if (!currentUserId) return;
-    setInviteGenerating(true);
-    setInviteLink(null);
-    const { data, error } = await supabase
-      .from('invitations')
-      .insert({
-        inviter_id:  currentUserId,
-        circle_type: selectedCircleType,
-        code:        Math.random().toString(36).substring(2, 10),
-      })
-      .select()
-      .single();
-    setInviteGenerating(false);
-    if (!error && data) {
-      setInviteLink(`https://prayer-war-room.vercel.app/join/${(data as any).code}`);
-    }
-  };
-
-  const copyLink = async (link: string, setCopied: (v: boolean) => void) => {
-    try {
-      if (Platform.OS === 'web' && (navigator as any)?.clipboard) {
-        await (navigator as any).clipboard.writeText(link);
-      } else {
-        await Share.share({ message: link });
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* user cancelled share */ }
-  };
-
-  // ── Pastor ministry invitation ──
+  // ── Pastor ministry code (6 digits, one per pastor) ──
   const handleGenerateMinistryInvite = async () => {
-    console.log('[MinistryInvite] handler start, currentUserId:', currentUserId);
     if (!currentUserId) return;
     setMinistryInviteLoading(true);
-    // Invalidate previous ministry codes for this pastor
-    const { error: deleteError } = await supabase.from('invitations')
-      .delete()
-      .eq('inviter_id', currentUserId)
-      .eq('circle_type', 'ministry');
-    if (deleteError) console.error('[MinistryInvite] delete failed:', deleteError);
-    const { data, error: insertError } = await supabase
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const { data, error } = await supabase
       .from('invitations')
-      .insert({
+      .upsert({
         inviter_id:  currentUserId,
-        circle_type: 'ministry',
         ministry_id: currentUserId,
-        code:        Math.random().toString(36).substring(2, 10),
-      })
+        circle_type: 'ministry',
+        code,
+      }, { onConflict: 'inviter_id,circle_type' })
       .select()
       .single();
-    if (insertError) console.error('[MinistryInvite] insert failed:', insertError);
-    console.log('[MinistryInvite] inserted row:', data);
+    if (error) console.error('[MinistryCode] regenerate failed:', error);
     setMinistryInvite(data ?? null);
     setMinistryInviteLoading(false);
+  };
+
+  // ── Member joins ministry by 6-digit code ──
+  const handleJoinByCode = async () => {
+    if (!currentUserId || joinCode.trim().length !== 6) {
+      setJoinCodeError('Código no válido');
+      return;
+    }
+    setJoinCodeSubmitting(true);
+    setJoinCodeError('');
+    const { data: invite } = await supabase
+      .from('invitations')
+      .select('inviter_id')
+      .eq('code', joinCode.trim())
+      .eq('circle_type', 'ministry')
+      .single();
+    if (!invite) {
+      setJoinCodeError('Código no válido');
+      setJoinCodeSubmitting(false);
+      return;
+    }
+    const { error } = await supabase.from('circles').insert({
+      owner_id:    invite.inviter_id,
+      member_id:   currentUserId,
+      circle_type: 'ministry',
+      status:      'accepted',
+    });
+    setJoinCodeSubmitting(false);
+    if (error) {
+      setJoinCodeError('No se pudo unir. Intenta de nuevo.');
+      return;
+    }
+    setJoinCodeSuccess(true);
+    setJoinCode('');
+    fetchCircles();
   };
 
   // ── Prayer answered celebration ──
@@ -1303,6 +1313,36 @@ function WebCRM() {
             })
           )}
 
+          {/* Ministry join by code */}
+          {circles.some((c: any) => c.circle_type === 'ministry') ? (
+            <Text style={{ color: '#4ade80', fontSize: 12, marginBottom: 10, marginLeft: 4 }}>✓ Conectado a tu ministerio</Text>
+          ) : joinCodeSuccess ? (
+            <Text style={{ color: '#4ade80', fontSize: 12, marginBottom: 10, marginLeft: 4 }}>Te uniste al ministerio ✓</Text>
+          ) : (
+            <View style={{ backgroundColor: '#0f0f1a', borderRadius: 10, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
+              <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 8 }}>¿Tu iglesia usa War Room?</Text>
+              <TextInput
+                style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, color: '#e2e8f0', fontSize: 14, marginBottom: 8, letterSpacing: 2 }}
+                placeholder="Código de 6 dígitos"
+                placeholderTextColor="#475569"
+                value={joinCode}
+                onChangeText={t => { setJoinCode(t.replace(/[^0-9]/g, '').slice(0, 6)); setJoinCodeError(''); }}
+                keyboardType="numeric"
+                maxLength={6}
+              />
+              {joinCodeError ? <Text style={{ color: '#f87171', fontSize: 11, marginBottom: 6 }}>{joinCodeError}</Text> : null}
+              <Pressable
+                style={{ backgroundColor: '#7c3aed', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}
+                disabled={joinCodeSubmitting}
+                onPress={handleJoinByCode}
+              >
+                {joinCodeSubmitting
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Unirme</Text>}
+              </Pressable>
+            </View>
+          )}
+
           <Pressable
             style={[w.navItem, { borderStyle: 'dashed', borderWidth: 1, borderColor: '#334155', borderRadius: 8 }]}
             onPress={() => { setCircleTab('add'); setMemberShowForm(false); }}
@@ -1524,7 +1564,7 @@ function WebCRM() {
                       <Pressable
                         key={t}
                         style={[w.catPill, selectedCircleType === t && w.catPillActive]}
-                        onPress={() => { setSelectedCircleType(t); setInviteLink(null); }}
+                        onPress={() => setSelectedCircleType(t)}
                       >
                         <Text style={[w.catPillTxt, selectedCircleType === t && { color: '#fff' }]}>
                           {t === 'family' ? 'Familia' : t === 'friends' ? 'Amigos' : 'Ministerio'}
@@ -1532,44 +1572,6 @@ function WebCRM() {
                       </Pressable>
                     ))}
                   </View>
-
-                  {/* Invitation link generator */}
-                  <Pressable
-                    style={{ borderWidth: 1, borderColor: '#334155', borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginBottom: 12, flexDirection: 'row', justifyContent: 'center', gap: 8 }}
-                    disabled={inviteGenerating}
-                    onPress={handleGenerateInvite}
-                  >
-                    {inviteGenerating
-                      ? <ActivityIndicator size="small" color="#a78bfa" />
-                      : (
-                        <>
-                          <Ionicons name="link-outline" size={15} color="#94a3b8" />
-                          <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Generar enlace de invitación</Text>
-                        </>
-                      )}
-                  </Pressable>
-
-                  {inviteLink && (
-                    <View style={[w.aiCard, { marginBottom: 16 }]}>
-                      <Text style={{ color: '#c4b5fd', fontSize: 12, marginBottom: 10 }} selectable numberOfLines={1}>
-                        {inviteLink}
-                      </Text>
-                      <Pressable
-                        style={[w.victoriaBtn, { backgroundColor: '#7c3aed', paddingVertical: 8, marginBottom: 8 }]}
-                        onPress={() => copyLink(inviteLink, setInviteCopied)}
-                      >
-                        <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 13 }]}>
-                          {inviteCopied ? '✓ Copiado' : 'Copiar enlace'}
-                        </Text>
-                      </Pressable>
-                      <Text style={{ color: '#334155', fontSize: 11 }}>Este enlace expira en 30 días</Text>
-                      {selectedCircleType === 'ministry' && (
-                        <Text style={{ color: '#334155', fontSize: 11, marginTop: 2 }}>
-                          Cualquiera con este enlace se conectará a tu ministerio
-                        </Text>
-                      )}
-                    </View>
-                  )}
 
                   <Text style={w.sectionLbl}>BUSCAR MIEMBRO</Text>
                   <View style={[w.searchBar, { marginBottom: 12 }]}>
@@ -2346,50 +2348,28 @@ function WebCRM() {
                 </View>
               ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 6 }}>
-                  {/* Ministry invitation section */}
-                  <View style={[w.card, { padding: 16, marginBottom: 12 }]}>
-                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 4 }}>⛪ Invitación al Ministerio</Text>
-                    <Text style={{ color: '#475569', fontSize: 12, marginBottom: 14 }}>
-                      Comparte este enlace con tu congregación:
-                    </Text>
+                  {/* Ministry code section */}
+                  <View style={[w.card, { padding: 16, marginBottom: 12, alignItems: 'center' }]}>
+                    <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 15, marginBottom: 12, alignSelf: 'flex-start' as any }}>⛪ Código de tu ministerio:</Text>
                     {ministryInvite ? (
-                      <>
-                        <View style={[w.aiCard, { marginBottom: 10, padding: 12 }]}>
-                          <Text style={{ color: '#c4b5fd', fontSize: 12 }} selectable numberOfLines={1}>
-                            https://prayer-war-room.vercel.app/join/{ministryInvite.code}
-                          </Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          <Pressable
-                            style={[w.victoriaBtn, { backgroundColor: '#7c3aed', paddingVertical: 8, paddingHorizontal: 16, marginBottom: 0, flex: 1 }]}
-                            onPress={() => copyLink(`https://prayer-war-room.vercel.app/join/${ministryInvite.code}`, setMinistryCopied)}
-                          >
-                            <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 13 }]}>
-                              {ministryCopied ? '✓ Copiado' : 'Copiar enlace'}
-                            </Text>
-                          </Pressable>
-                          <Pressable
-                            style={{ borderWidth: 1, borderColor: '#334155', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' }}
-                            disabled={ministryInviteLoading}
-                            onPress={handleGenerateMinistryInvite}
-                          >
-                            {ministryInviteLoading
-                              ? <ActivityIndicator size="small" color="#a78bfa" />
-                              : <Text style={{ color: '#94a3b8', fontSize: 13 }}>Regenerar código</Text>}
-                          </Pressable>
-                        </View>
-                      </>
+                      <Text style={{ color: '#a78bfa', fontSize: 32, fontFamily: Platform.OS === 'web' ? 'monospace' : 'Courier', fontWeight: '700', letterSpacing: 6, marginBottom: 8 }} selectable>
+                        {ministryInvite.code}
+                      </Text>
                     ) : (
-                      <Pressable
-                        style={[w.victoriaBtn, { backgroundColor: '#7c3aed', paddingVertical: 10, marginBottom: 0 }]}
-                        disabled={ministryInviteLoading}
-                        onPress={handleGenerateMinistryInvite}
-                      >
-                        {ministryInviteLoading
-                          ? <ActivityIndicator color="#fff" />
-                          : <Text style={[w.victoriaTxt, { color: '#fff', fontSize: 13 }]}>Generar nuevo código</Text>}
-                      </Pressable>
+                      <ActivityIndicator color="#7c3aed" style={{ marginVertical: 12 }} />
                     )}
+                    <Text style={{ color: '#475569', fontSize: 12, marginBottom: 14 }}>
+                      Comparte este código con tu congregación
+                    </Text>
+                    <Pressable
+                      style={{ borderWidth: 1, borderColor: '#334155', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 18 }}
+                      disabled={ministryInviteLoading}
+                      onPress={handleGenerateMinistryInvite}
+                    >
+                      {ministryInviteLoading
+                        ? <ActivityIndicator size="small" color="#a78bfa" />
+                        : <Text style={{ color: '#94a3b8', fontSize: 13 }}>Generar nuevo código</Text>}
+                    </Pressable>
                   </View>
 
                   {allProfiles.length === 0 && (
