@@ -1007,14 +1007,16 @@ function WebCRM() {
 
   // ── Pastor ministry invitation ──
   const handleGenerateMinistryInvite = async () => {
+    console.log('[MinistryInvite] handler start, currentUserId:', currentUserId);
     if (!currentUserId) return;
     setMinistryInviteLoading(true);
     // Invalidate previous ministry codes for this pastor
-    await supabase.from('invitations')
+    const { error: deleteError } = await supabase.from('invitations')
       .delete()
       .eq('inviter_id', currentUserId)
       .eq('circle_type', 'ministry');
-    const { data } = await supabase
+    if (deleteError) console.error('[MinistryInvite] delete failed:', deleteError);
+    const { data, error: insertError } = await supabase
       .from('invitations')
       .insert({
         inviter_id:  currentUserId,
@@ -1024,6 +1026,8 @@ function WebCRM() {
       })
       .select()
       .single();
+    if (insertError) console.error('[MinistryInvite] insert failed:', insertError);
+    console.log('[MinistryInvite] inserted row:', data);
     setMinistryInvite(data ?? null);
     setMinistryInviteLoading(false);
   };
