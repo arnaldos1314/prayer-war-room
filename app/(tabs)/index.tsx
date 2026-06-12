@@ -569,11 +569,13 @@ function WebCRM() {
             .eq('inviter_id', currentUserId)
             .eq('circle_type', 'ministry')
             .limit(1);
-          if (data && data.length > 0) {
+          // Reuse existing code only if it's a plain 6-digit number
+          // (legacy rows may have alphanumeric codes that members can't type)
+          if (data && data.length > 0 && /^\d{6}$/.test(data[0].code ?? '')) {
             setMinistryInvite(data[0]);
             return;
           }
-          // No code yet — generate one
+          // No valid code yet — generate a plain 6-digit one
           const code = Math.floor(100000 + Math.random() * 900000).toString();
           const { data: created, error } = await supabase.from('invitations').upsert({
             inviter_id:  currentUserId,
