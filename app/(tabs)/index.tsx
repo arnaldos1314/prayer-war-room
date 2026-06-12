@@ -335,6 +335,7 @@ function WebCRM() {
   const [memberCircle,     setMemberCircle]     = useState<'personal' | 'family' | 'friends' | 'ministry'>('personal');
   const [memberPrayers,    setMemberPrayers]    = useState<any[]>([]);
   const [memberLoading,    setMemberLoading]    = useState(false);
+  const [memberTotalCount, setMemberTotalCount] = useState<number | null>(null);
   const [memberShowForm,   setMemberShowForm]   = useState(false);
   const [memberContent,    setMemberContent]    = useState('');
   const [memberCat,        setMemberCat]        = useState('salud');
@@ -599,11 +600,22 @@ function WebCRM() {
     setMemberLoading(false);
   }, [currentUserId, memberCircle]);
 
+  // Total request count across ALL circles — drives the welcome empty state
+  const fetchMemberTotalCount = useCallback(async () => {
+    if (!currentUserId) return;
+    const { count } = await supabase
+      .from('prayer_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', currentUserId);
+    setMemberTotalCount(count ?? 0);
+  }, [currentUserId]);
+
   useEffect(() => {
     if (currentUserRole && currentUserRole !== 'pastor' && currentUserId) {
       fetchMemberPrayers();
+      fetchMemberTotalCount();
     }
-  }, [memberCircle, currentUserRole, currentUserId, fetchMemberPrayers]);
+  }, [memberCircle, currentUserRole, currentUserId, fetchMemberPrayers, fetchMemberTotalCount]);
 
   const handleMemberSubmit = async () => {
     if (!memberContent.trim()) { setMemberErr('Escribe tu petición.'); return; }
@@ -632,6 +644,7 @@ function WebCRM() {
       setMemberVisibility('private'); setMemberAnonymous(false);
       setMemberShowForm(false);
       fetchMemberPrayers();
+      setMemberTotalCount(prev => (prev ?? 0) + 1);
       if (memberVisibility === 'congregation') setWallPendingCount(prev => prev + 1);
 
       // Trigger AI suggestion
@@ -1012,6 +1025,40 @@ function WebCRM() {
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                   <ActivityIndicator color="#7c3aed" />
                 </View>
+              ) : memberTotalCount === 0 ? (
+                /* Welcome empty state — user has 0 requests across ALL circles */
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 0 }}>
+                  <Ionicons name="heart-outline" size={64} color="#475569" />
+                  <Text style={{ color: '#fff', fontFamily: 'serif', fontSize: 22, fontWeight: '700', marginTop: 20, textAlign: 'center' }}>
+                    Bienvenido a tu War Room
+                  </Text>
+                  <Text style={{ color: '#475569', fontSize: 14, textAlign: 'center', maxWidth: 320, marginTop: 10, lineHeight: 21 }}>
+                    Este es tu espacio personal de oración. Empieza agregando tu primera petición.
+                  </Text>
+                  <Pressable
+                    style={[w.newBtn, { marginTop: 24, paddingHorizontal: 24, paddingVertical: 12 }]}
+                    onPress={() => { setMemberShowForm(true); setCircleTab('members'); }}
+                  >
+                    <Ionicons name="add" size={18} color="#fff" />
+                    <Text style={[w.newBtnTxt, { fontSize: 15 }]}>Nueva Petición</Text>
+                  </Pressable>
+
+                  {/* Secondary: join a ministry */}
+                  <View style={[w.card, { marginTop: 40, padding: 20, maxWidth: 360, width: '100%' as any, alignItems: 'center' }]}>
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '500', marginBottom: 6, textAlign: 'center' }}>
+                      ¿Tu iglesia usa War Room?
+                    </Text>
+                    <Text style={{ color: '#475569', fontSize: 13, textAlign: 'center', marginBottom: 16, lineHeight: 19 }}>
+                      Conéctate con tu ministerio para sumar fuerzas en oración.
+                    </Text>
+                    <Pressable
+                      style={{ borderWidth: 1, borderColor: '#334155', borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 }}
+                      onPress={() => { setCircleTab('add'); setSelectedCircleType('ministry'); setMemberShowForm(false); }}
+                    >
+                      <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Unirme a un ministerio</Text>
+                    </Pressable>
+                  </View>
+                </ScrollView>
               ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 8 }}>
                   {memberPrayers.length === 0 && (
