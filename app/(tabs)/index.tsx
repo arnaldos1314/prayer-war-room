@@ -1173,7 +1173,7 @@ function WebCRM() {
   }
 
   // PART 2 — Profile completion screen (shown when full_name is missing)
-  if (!profile?.full_name || profile.full_name.trim().length === 0) {
+  if (!profile?.full_name?.trim()) {
     return (
       <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }]}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingVertical: 40, alignItems: 'center', maxWidth: 400, width: '100%', alignSelf: 'center' as any }}>
@@ -2093,8 +2093,8 @@ function WebCRM() {
                   ) : wallTab === 'approved' ? (
                     wallRequests.filter((r: any) => r.wall_approved).length === 0 ? (
                       <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
-                        <Ionicons name="earth-outline" size={44} color="#1e293b" />
-                        <Text style={{ color: '#334155', fontSize: 14 }}>No hay peticiones aprobadas en la pared</Text>
+                        <Ionicons name="heart-outline" size={44} color="#1e293b" />
+                        <Text style={{ color: '#334155', fontSize: 14 }}>Aún no hay testimonios compartidos</Text>
                       </View>
                     ) : wallRequests.filter((r: any) => r.wall_approved).map((r: any) => (
                       <View key={r.id} style={w.card}>
@@ -2454,6 +2454,17 @@ function WebCRM() {
               <Text style={{ color: '#475569', marginTop: 12 }}>Calculando estadísticas…</Text>
             </View>
           ) : (() => {
+            // ── Empty state — no data yet ──
+            if (analyticsData.length === 0) {
+              return (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+                  <Ionicons name="bar-chart-outline" size={48} color="#1e293b" />
+                  <Text style={{ color: '#334155', fontSize: 14, textAlign: 'center', maxWidth: 380, marginTop: 14, lineHeight: 21 }}>
+                    Aún no hay suficientes datos para mostrar estadísticas. Las gráficas aparecerán cuando tu congregación comience a compartir peticiones.
+                  </Text>
+                </View>
+              );
+            }
             // ── Compute analytics client-side ──
             const total = analyticsData.length;
             const victories = analyticsData.filter(r => r.status === 'victory').length;
@@ -2789,10 +2800,31 @@ function WebCRM() {
             ) : (
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 8 }}>
                 {filtered.length === 0 && (
-                  <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
-                    <Ionicons name="checkmark-circle-outline" size={44} color="#1e293b" />
-                    <Text style={{ color: '#334155', fontSize: 14 }}>Sin peticiones en esta vista</Text>
-                  </View>
+                  activeNav === 'incoming' && requests.length === 0 && !search && !activeChip ? (
+                    /* First-run welcome — fresh ministry, no requests yet */
+                    <View style={{ paddingTop: 64, alignItems: 'center' }}>
+                      <View style={[w.card, { padding: 28, maxWidth: 420, width: '100%' as any, alignItems: 'center' }]}>
+                        <Text style={{ fontSize: 32, marginBottom: 10 }}>👋</Text>
+                        <Text style={{ color: '#f8fafc', fontSize: 18, fontWeight: '700', marginBottom: 10, textAlign: 'center' }}>
+                          Bienvenido a tu War Room
+                        </Text>
+                        <Text style={{ color: '#64748b', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 20 }}>
+                          Tu CRM está listo. Comparte tu código de ministerio (en Ajustes) con tu congregación para empezar a recibir peticiones de oración.
+                        </Text>
+                        <Pressable
+                          style={[w.newBtn, { paddingHorizontal: 20, paddingVertical: 10 }]}
+                          onPress={() => { setActiveNav('ajustes'); setSelected(null); }}
+                        >
+                          <Text style={w.newBtnTxt}>Ir a Ajustes →</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
+                      <Ionicons name="checkmark-circle-outline" size={44} color="#1e293b" />
+                      <Text style={{ color: '#334155', fontSize: 14 }}>Sin peticiones en esta vista</Text>
+                    </View>
+                  )
                 )}
                 {filtered.map(item => {
                   const isHov = hoveredId === item.id;
