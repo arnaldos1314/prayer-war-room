@@ -389,6 +389,14 @@ function WebCRM() {
   // Intercesores panel
   const [intercessors,    setIntercessors]    = useState<any[]>([]);
   const [interLoading,    setInterLoading]    = useState(false);
+
+  // Member directory (Intercesores tab → "Miembros del Ministerio")
+  const [memberDirectory,   setMemberDirectory]   = useState<any[]>([]);
+  const [memberDirLoading,  setMemberDirLoading]  = useState(false);
+  const [memberSearch,      setMemberSearch]      = useState('');
+
+  // Cache of requester profiles for wall pending cards, keyed by user_id
+  const [profileCache, setProfileCache] = useState<Record<string, any>>({});
   const [showInterForm,   setShowInterForm]   = useState(false);
   const [interName,       setInterName]       = useState('');
   const [interEmail,      setInterEmail]      = useState('');
@@ -600,6 +608,7 @@ function WebCRM() {
     setRoleUpdating(userId);
     await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
     setAllProfiles(prev => prev.map(p => p.id === userId ? { ...p, role: newRole } : p));
+    setMemberDirectory(prev => prev.map(p => p.id === userId ? { ...p, role: newRole } : p));
     setRoleUpdating(null);
   };
 
@@ -614,6 +623,61 @@ function WebCRM() {
         .then(({ data }) => { setIntercessors(data ?? []); setInterLoading(false); });
     }
   }, [activeNav]);
+
+  // Fetch member directory (everyone connected via ministry circles) when panel becomes active
+  useEffect(() => {
+    if (activeNav === 'intercesores' && currentUserId) {
+      setMemberDirLoading(true);
+      (async () => {
+        const { data: circleRows } = await supabase
+          .from('circles')
+          .select('member_id, status, created_at')
+          .eq('owner_id', currentUserId)
+          .eq('circle_type', 'ministry')
+          .eq('status', 'accepted');
+
+        const memberIds = (circleRows ?? []).map((c: any) => c.member_id).filter(Boolean);
+        if (memberIds.length === 0) {
+          setMemberDirectory([]);
+          setMemberDirLoading(false);
+          return;
+        }
+
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, full_name, role, phone, city, country, church')
+          .in('id', memberIds);
+
+        const merged = (profs ?? []).map((p: any) => ({
+          ...p,
+          joined_at: circleRows?.find((c: any) => c.member_id === p.id)?.created_at ?? null,
+        }));
+        setMemberDirectory(merged);
+        setMemberDirLoading(false);
+      })();
+    }
+  }, [activeNav, currentUserId]);
+
+  // Fetch + cache requester profiles for wall pending cards
+  useEffect(() => {
+    const pendingIds = wallRequests
+      .filter((r: any) => r.wall_pending && !r.wall_approved && r.user_id)
+      .map((r: any) => r.user_id as string);
+    const missing = Array.from(new Set(pendingIds.filter(id => !profileCache[id])));
+    if (missing.length === 0) return;
+    supabase
+      .from('profiles')
+      .select('id, full_name, phone, city, country, church')
+      .in('id', missing)
+      .then(({ data }) => {
+        if (!data) return;
+        setProfileCache(prev => {
+          const next = { ...prev };
+          data.forEach((p: any) => { next[p.id] = p; });
+          return next;
+        });
+      });
+  }, [wallRequests, profileCache]);
 
   // Fetch wall requests when panel becomes active
   useEffect(() => {
@@ -2275,6 +2339,34 @@ function WebCRM() {
                           )}
                           <Text style={w.cardTime}>{timeAgo(r.created_at)}</Text>
                         </View>
+                        {!r.anonymous && r.user_id && (() => {
+                          const rp = profileCache[r.user_id];
+                          if (!rp) return null;
+                          const hasName = rp.full_name && rp.full_name.trim() && !rp.full_name.includes('@');
+                          return (
+                            <View style={{ marginBottom: 8 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#1e1b4b', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Text style={{ color: '#a78bfa', fontWeight: '700', fontSize: 11 }}>{getInitials(hasName ? rp.full_name : '?')}</Text>
+                                </View>
+                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                                  {hasName ? rp.full_name : 'Miembro sin perfil completo'}
+                                </Text>
+                              </View>
+                              {(rp.city || rp.country) && (
+                                <Text style={{ color: '#94a3b8', fontSize: 11, marginBottom: 2 }}>📍 {[rp.city, rp.country].filter(Boolean).join(', ')}</Text>
+                              )}
+                              {rp.church && (
+                                <Text style={{ color: '#94a3b8', fontSize: 11, marginBottom: 2 }}>⛪ {rp.church}</Text>
+                              )}
+                              {rp.phone && (
+                                <Pressable onPress={() => Linking.openURL(`https://wa.me/${rp.phone.replace(/[^0-9]/g, '')}`)}>
+                                  <Text style={{ color: '#4ade80', fontSize: 11, marginBottom: 2 }}>📱 {rp.phone}</Text>
+                                </Pressable>
+                              )}
+                            </View>
+                          );
+                        })()}
                         {!r.anonymous && r.title && (
                           <Text style={{ color: '#64748b', fontSize: 12, marginBottom: 6 }}>{r.title} {toFlag(r.country_code)}</Text>
                         )}
@@ -2323,44 +2415,102 @@ function WebCRM() {
 
         ) : activeNav === 'intercesores' ? (
           <View style={{ flex: 1, flexDirection: 'row' }}>
-            {/* Intercessors list */}
+            {/* Member directory */}
             <View style={[w.feed, { borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.06)' }]}>
-              <View style={w.feedTopBar}>
-                <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', flex: 1 }}>Intercesores del Ministerio</Text>
-                <Pressable style={w.newBtn} onPress={() => setShowInterForm(true)}>
-                  <Ionicons name="add" size={16} color="#fff" />
-                  <Text style={w.newBtnTxt}>Agregar Intercesor</Text>
-                </Pressable>
+              <View style={[w.feedTopBar, { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', flex: 1 }}>Miembros del Ministerio</Text>
+                  {memberDirectory.length > 0 && (
+                    <View style={[w.badge, { backgroundColor: '#1e1b4b', borderColor: '#7c3aed55' }]}>
+                      <Text style={[w.badgeTxt, { color: '#a78bfa' }]}>{memberDirectory.length}</Text>
+                    </View>
+                  )}
+                  <Pressable style={w.newBtn} onPress={() => setShowInterForm(true)}>
+                    <Ionicons name="add" size={16} color="#fff" />
+                    <Text style={w.newBtnTxt}>Agregar Intercesor</Text>
+                  </Pressable>
+                </View>
+                <TextInput
+                  style={[w.formInput as any, { width: '100%' as any }]}
+                  placeholder="Buscar por nombre…"
+                  placeholderTextColor="#475569"
+                  value={memberSearch}
+                  onChangeText={setMemberSearch}
+                />
               </View>
-              {interLoading ? (
+              {memberDirLoading ? (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                   <ActivityIndicator color="#7c3aed" />
                 </View>
               ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
-                  {intercessors.length === 0 && (
+                  {memberDirectory.length === 0 ? (
                     <View style={{ paddingTop: 48, alignItems: 'center', gap: 10 }}>
                       <Ionicons name="people-outline" size={44} color="#1e293b" />
-                      <Text style={{ color: '#334155', fontSize: 14 }}>No hay intercesores registrados</Text>
+                      <Text style={{ color: '#334155', fontSize: 14, textAlign: 'center', paddingHorizontal: 32 }}>
+                        Aún no hay miembros conectados a tu ministerio. Comparte tu código desde Ajustes.
+                      </Text>
                     </View>
-                  )}
-                  {intercessors.map((p: any) => (
-                    <View key={p.id} style={[w.card, { flexDirection: 'row', alignItems: 'center', gap: 14 }]}>
-                      <View style={[w.assignedAvatarBig, { width: 40, height: 40, borderRadius: 20 }]}>
-                        <Text style={[w.assignedAvatarTxt, { fontSize: 14 }]}>{getInitials(p.full_name ?? '?')}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: '#e2e8f0', fontWeight: '600', fontSize: 14 }}>{p.full_name ?? 'Sin nombre'}</Text>
-                        <Text style={{ color: '#475569', fontSize: 12, marginTop: 2 }}>{p.email ?? ''}</Text>
-                      </View>
-                      <View style={[w.badge, { backgroundColor: '#1e1b4b', borderColor: '#7c3aed55' }]}>
-                        <Text style={[w.badgeTxt, { color: '#a78bfa' }]}>{p.role ?? 'intercesor'}</Text>
-                      </View>
-                      <View style={[w.badge, { backgroundColor: '#14532d22', borderColor: '#4ade8044' }]}>
-                        <Text style={[w.badgeTxt, { color: '#4ade80' }]}>activo</Text>
-                      </View>
-                    </View>
-                  ))}
+                  ) : (() => {
+                    const ROLE_OPTIONS = ['user', 'intercessor', 'pastor'] as const;
+                    type RoleKey = typeof ROLE_OPTIONS[number];
+                    const roleMeta: Record<RoleKey, { label: string; color: string; bg: string }> = {
+                      pastor:      { label: 'Pastor',    color: '#a78bfa', bg: 'rgba(124,58,237,0.2)'  },
+                      intercessor: { label: 'Intercesor',color: '#2dd4bf', bg: 'rgba(20,184,166,0.2)'  },
+                      user:        { label: 'Miembro',   color: '#94a3b8', bg: 'rgba(100,116,139,0.2)' },
+                    };
+                    const filtered = memberDirectory.filter((p: any) =>
+                      !memberSearch.trim() || (p.full_name ?? '').toLowerCase().includes(memberSearch.trim().toLowerCase())
+                    );
+                    return filtered.map((p: any) => {
+                      const meta = roleMeta[(p.role as RoleKey) ?? 'user'] ?? roleMeta.user;
+                      const isUpdating = roleUpdating === p.id;
+                      return (
+                        <View key={p.id} style={{ backgroundColor: '#0f0f1a', borderRadius: 8, padding: 14, marginBottom: 6, flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+                          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#1e1b4b', alignItems: 'center', justifyContent: 'center' }}>
+                            <Text style={{ color: '#a78bfa', fontWeight: '700', fontSize: 14 }}>{getInitials(p.full_name ?? '?')}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' as any }}>
+                              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>{p.full_name ?? 'Sin nombre'}</Text>
+                              <View style={[w.badge, { backgroundColor: meta.bg, borderColor: meta.color + '55' }]}>
+                                <Text style={[w.badgeTxt, { color: meta.color }]}>{meta.label}</Text>
+                              </View>
+                            </View>
+                            {(p.city || p.country) && (
+                              <Text style={{ color: '#94a3b8', fontSize: 12, marginBottom: 2 }}>📍 {[p.city, p.country].filter(Boolean).join(', ')}</Text>
+                            )}
+                            {p.church && (
+                              <Text style={{ color: '#94a3b8', fontSize: 12, marginBottom: 2 }}>⛪ {p.church}</Text>
+                            )}
+                            {p.phone && (
+                              <Pressable onPress={() => Linking.openURL(`https://wa.me/${p.phone.replace(/[^0-9]/g, '')}`)}>
+                                <Text style={{ color: '#4ade80', fontSize: 12, marginBottom: 2 }}>📱 {p.phone}</Text>
+                              </Pressable>
+                            )}
+                            {p.joined_at && (
+                              <Text style={{ color: '#475569', fontSize: 11, marginTop: 2 }}>Se unió hace {timeAgo(p.joined_at)}</Text>
+                            )}
+                          </View>
+                          {isUpdating ? (
+                            <ActivityIndicator color="#7c3aed" size="small" />
+                          ) : (
+                            <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' as any, maxWidth: 140, justifyContent: 'flex-end' }}>
+                              {ROLE_OPTIONS.filter(r => r !== p.role).map(r => (
+                                <Pressable
+                                  key={r}
+                                  style={[w.catPill, { paddingHorizontal: 8, paddingVertical: 4 }]}
+                                  onPress={() => handleRoleChange(p.id, r)}
+                                >
+                                  <Text style={[w.catPillTxt, { fontSize: 11 }]}>{roleMeta[r].label}</Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    });
+                  })()}
                 </ScrollView>
               )}
             </View>
