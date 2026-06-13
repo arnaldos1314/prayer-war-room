@@ -378,7 +378,7 @@ function WebCRM() {
   // Current user identity
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState('');
-  const [profile,         setProfile]         = useState<{ id?: string; full_name?: string | null; role?: string; church?: string | null; country?: string | null } | null>(null);
+  const [profile,         setProfile]         = useState<{ id?: string; full_name?: string | null; role?: string; church?: string | null; country?: string | null; phone?: string | null; city?: string | null } | null>(null);
   const [profileLoading,  setProfileLoading]  = useState(true);
 
   // Ajustes — role management
@@ -399,9 +399,15 @@ function WebCRM() {
   const [interErr,        setInterErr]        = useState('');
 
   // Profile completion (PART 2)
-  const [profileNombre,    setProfileNombre]    = useState('');
-  const [profileIglesia,   setProfileIglesia]   = useState('');
-  const [profilePaisSetup, setProfilePaisSetup] = useState('');
+  const [profileNombre,      setProfileNombre]      = useState('');
+  const [profileIglesia,     setProfileIglesia]     = useState('');
+  const [profilePaisSetup,   setProfilePaisSetup]   = useState('');
+  const [profileTelefono,    setProfileTelefono]    = useState('');
+  const [profileCiudad,      setProfileCiudad]      = useState('');
+  const [profileEditVisible, setProfileEditVisible] = useState(false);
+
+  // Requester info shown to pastor in CRM detail
+  const [requesterProfile, setRequesterProfile] = useState<any | null>(null);
   const [profileSaving,    setProfileSaving]    = useState(false);
   const [profileErr,       setProfileErr]       = useState('');
   const [currentUserId,    setCurrentUserId]    = useState<string | null>(null);
@@ -512,7 +518,7 @@ function WebCRM() {
         setCurrentUserId(user.id);
         const { data } = await supabase
           .from('profiles')
-          .select('id, full_name, role, church, country')
+          .select('id, full_name, role, church, country, phone, city')
           .eq('id', user.id)
           .single();
         if (!data || !data.full_name) {
@@ -553,7 +559,7 @@ function WebCRM() {
       setProfilesLoading(true);
       supabase
         .from('profiles')
-        .select('id, full_name, role, church, country')
+        .select('id, full_name, role, church, country, phone, city')
         .order('created_at', { ascending: true })
         .limit(500)
         .then(({ data, error }) => {
@@ -700,6 +706,8 @@ function WebCRM() {
         full_name: profileNombre.trim(),
         church: profileIglesia.trim() || null,
         country: profilePaisSetup.trim() || null,
+        phone: profileTelefono.trim() || null,
+        city: profileCiudad.trim() || null,
       });
     } catch (err: any) {
       setProfileErr(err.message ?? 'Error al guardar');
@@ -707,9 +715,27 @@ function WebCRM() {
       // Always update profile state — gate resolves automatically when full_name is set
       const name = profileNombre.trim();
       setCurrentUserName(name);
-      setProfile(prev => ({ ...prev, full_name: name }));
+      setProfile(prev => ({
+        ...prev,
+        full_name: name,
+        church: profileIglesia.trim() || null,
+        country: profilePaisSetup.trim() || null,
+        phone: profileTelefono.trim() || null,
+        city: profileCiudad.trim() || null,
+      }));
+      setProfileEditVisible(false);
       setProfileSaving(false);
     }
+  };
+
+  const openProfileEdit = () => {
+    setProfileNombre(profile?.full_name ?? '');
+    setProfileIglesia(profile?.church ?? '');
+    setProfilePaisSetup(profile?.country ?? '');
+    setProfileTelefono(profile?.phone ?? '');
+    setProfileCiudad(profile?.city ?? '');
+    setProfileErr('');
+    setProfileEditVisible(true);
   };
 
   // ── Wall handlers (PART 3) ──
@@ -1079,6 +1105,21 @@ function WebCRM() {
     fetchMemberPrayers();
   };
 
+  // Fetch requester profile for the pastor detail panel
+  // (skipped for walk-ins created by the pastor themselves)
+  useEffect(() => {
+    if (!selected?.user_id || selected.user_id === currentUserId) {
+      setRequesterProfile(null);
+      return;
+    }
+    supabase
+      .from('profiles')
+      .select('full_name, phone, city, country, church')
+      .eq('id', selected.user_id)
+      .single()
+      .then(({ data }) => setRequesterProfile(data ?? null));
+  }, [selected?.user_id, currentUserId]);
+
   // Keep selected fresh when realtime updates arrive
   useEffect(() => {
     if (selected) {
@@ -1193,6 +1234,25 @@ function WebCRM() {
             autoCapitalize="words"
           />
 
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>TELÉFONO / WHATSAPP (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="+1 786 555 0123"
+            placeholderTextColor="#475569"
+            value={profileTelefono}
+            onChangeText={setProfileTelefono}
+            keyboardType="phone-pad"
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>CIUDAD (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="Tu ciudad"
+            placeholderTextColor="#475569"
+            value={profileCiudad}
+            onChangeText={setProfileCiudad}
+          />
+
           <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>IGLESIA (opcional)</Text>
           <TextInput
             style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
@@ -1219,6 +1279,75 @@ function WebCRM() {
 
           <Pressable onPress={() => supabase.auth.signOut()} style={{ marginTop: 20 }}>
             <Text style={{ color: '#334155', fontSize: 13 }}>Cerrar sesión</Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // "Mi perfil" — edit screen for existing users (same form, pre-filled)
+  if (profileEditVisible) {
+    return (
+      <View style={[w.root, { flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }]}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingVertical: 40, alignItems: 'center', maxWidth: 400, width: '100%', alignSelf: 'center' as any }}>
+          <Ionicons name="person-circle-outline" size={56} color="#7c3aed" />
+          <Text style={{ color: '#f8fafc', fontSize: 22, fontWeight: '700', marginTop: 16, marginBottom: 28 }}>Mi perfil</Text>
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>NOMBRE COMPLETO *</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="Tu nombre completo"
+            placeholderTextColor="#475569"
+            value={profileNombre}
+            onChangeText={setProfileNombre}
+            autoCapitalize="words"
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>TELÉFONO / WHATSAPP (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="+1 786 555 0123"
+            placeholderTextColor="#475569"
+            value={profileTelefono}
+            onChangeText={setProfileTelefono}
+            keyboardType="phone-pad"
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>CIUDAD (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="Tu ciudad"
+            placeholderTextColor="#475569"
+            value={profileCiudad}
+            onChangeText={setProfileCiudad}
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>IGLESIA (opcional)</Text>
+          <TextInput
+            style={[w.formInput as any, { marginBottom: 16, width: '100%' as any }]}
+            placeholder="Nombre de tu iglesia"
+            placeholderTextColor="#475569"
+            value={profileIglesia}
+            onChangeText={setProfileIglesia}
+          />
+
+          <Text style={[w.sectionLbl, { alignSelf: 'flex-start' as any }]}>PAÍS (opcional)</Text>
+          <CountrySelect value={profilePaisSetup} onChange={setProfilePaisSetup} />
+
+          {profileErr ? <Text style={{ color: '#f87171', fontSize: 12, marginBottom: 12 }}>{profileErr}</Text> : null}
+
+          <Pressable
+            style={[w.victoriaBtn, { backgroundColor: '#7c3aed', width: '100%' as any }]}
+            onPress={handleProfileSave}
+            disabled={profileSaving}
+          >
+            {profileSaving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={[w.victoriaTxt, { color: '#fff' }]}>Guardar cambios</Text>}
+          </Pressable>
+
+          <Pressable onPress={() => setProfileEditVisible(false)} style={{ marginTop: 20 }}>
+            <Text style={{ color: '#334155', fontSize: 13 }}>Cancelar</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -1357,6 +1486,10 @@ function WebCRM() {
           </Pressable>
 
           <View style={{ flex: 1 }} />
+          <Pressable style={w.signOutBtn} onPress={openProfileEdit}>
+            <Ionicons name="person-outline" size={15} color="#475569" />
+            <Text style={w.signOutTxt}>Mi perfil</Text>
+          </Pressable>
           <Pressable style={w.signOutBtn} onPress={() => supabase.auth.signOut()}>
             <Ionicons name="log-out-outline" size={15} color="#475569" />
             <Text style={w.signOutTxt}>Salir</Text>
@@ -2334,7 +2467,7 @@ function WebCRM() {
                   onPress={() => {
                     setProfilesLoading(true);
                     supabase.from('profiles')
-                      .select('id, full_name, role, church, country')
+                      .select('id, full_name, role, church, country, phone, city')
                       .order('created_at', { ascending: true })
                       .limit(500)
                       .then(({ data, error }) => {
@@ -2412,6 +2545,11 @@ function WebCRM() {
                           </Text>
                           {p.church ? (
                             <Text style={{ color: '#64748b', fontSize: 12, marginTop: 1 }}>{p.church}</Text>
+                          ) : null}
+                          {(p.city || p.phone) ? (
+                            <Text style={{ color: '#64748b', fontSize: 12, marginTop: 1 }}>
+                              {[p.city, p.phone].filter(Boolean).join(' · ')}
+                            </Text>
                           ) : null}
                         </View>
 
@@ -3021,6 +3159,30 @@ function WebCRM() {
                   </View>
                   {selected.urgent && <View style={w.urgentBadge}><Text style={w.urgentTxt}>⚡ URGENTE</Text></View>}
                 </View>
+
+                {requesterProfile && (
+                  <View style={[w.card, { marginBottom: 16, padding: 12 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1e1b4b', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ color: '#a78bfa', fontWeight: '700', fontSize: 13 }}>{getInitials(requesterProfile.full_name ?? '?')}</Text>
+                      </View>
+                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>{requesterProfile.full_name ?? 'Miembro'}</Text>
+                    </View>
+                    {(requesterProfile.city || requesterProfile.country) && (
+                      <Text style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>
+                        📍 {[requesterProfile.city, requesterProfile.country].filter(Boolean).join(', ')}
+                      </Text>
+                    )}
+                    {requesterProfile.phone && (
+                      <Pressable onPress={() => Linking.openURL(`https://wa.me/${requesterProfile.phone.replace(/[^0-9]/g, '')}`)}>
+                        <Text style={{ color: '#4ade80', fontSize: 12, marginBottom: 4 }}>📱 {requesterProfile.phone}</Text>
+                      </Pressable>
+                    )}
+                    {requesterProfile.church && (
+                      <Text style={{ color: '#94a3b8', fontSize: 12 }}>⛪ {requesterProfile.church}</Text>
+                    )}
+                  </View>
+                )}
 
                 <View style={w.prayerBox}>
                   <Text style={w.prayerTxt}>{selected.content}</Text>
